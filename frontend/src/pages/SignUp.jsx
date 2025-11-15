@@ -13,7 +13,6 @@ const SignUp = () => {
     email: '',
     phone: '',
     role: '',
-    specialization: '',
     licenseNumber: '',
     institution: '',
     password: '',
@@ -32,19 +31,6 @@ const SignUp = () => {
     { value: 'laboratory', label: 'أخصائي مختبر', icon: '🔬', color: '#f59e0b' }
   ];
 
-  const specializations = [
-    'طب عام',
-    'طب الأطفال',
-    'جراحة عامة',
-    'طب القلب',
-    'طب الأعصاب',
-    'طب العيون',
-    'طب الأسنان',
-    'طب النساء والولادة',
-    'طب الطوارئ',
-    'طب الأسرة'
-  ];
-
   const validateStep = () => {
     const newErrors = {};
 
@@ -61,9 +47,6 @@ const SignUp = () => {
     }
 
     if (currentStep === 3) {
-      if (formData.role === 'doctor' && !formData.specialization) {
-        newErrors.specialization = 'التخصص مطلوب';
-      }
       if ((formData.role === 'doctor' || formData.role === 'pharmacist' || formData.role === 'laboratory') && !formData.licenseNumber) {
         newErrors.licenseNumber = 'رقم الترخيص مطلوب';
       }
@@ -125,7 +108,6 @@ const SignUp = () => {
         phone: formData.phone,
         dateOfBirth: formData.dateOfBirth,
         gender: formData.gender,
-        specialization: formData.specialization,
         licenseNumber: formData.licenseNumber,
         institution: formData.institution,
         nationalId: formData.nationalId,
@@ -308,6 +290,7 @@ const SignUp = () => {
                       />
                       <span className="radio-custom"></span>
                       <span>أنثى</span>
+
                     </label>
                   </div>
                 </div>
@@ -344,26 +327,6 @@ const SignUp = () => {
             {/* Step 3: Professional Information */}
             {currentStep === 3 && (
               <div className="form-step">
-                {formData.role === 'doctor' && (
-                  <>
-                    <div className="form-group">
-                      <label className="form-label">التخصص</label>
-                      <select
-                        name="specialization"
-                        className={`form-input ${errors.specialization ? 'error' : ''}`}
-                        value={formData.specialization}
-                        onChange={handleChange}
-                      >
-                        <option value="">اختر التخصص</option>
-                        {specializations.map(spec => (
-                          <option key={spec} value={spec}>{spec}</option>
-                        ))}
-                      </select>
-                      {errors.specialization && <span className="error-message">{errors.specialization}</span>}
-                    </div>
-                  </>
-                )}
-
                 {(formData.role === 'doctor' || formData.role === 'pharmacist' || formData.role === 'laboratory') && (
                   <>
                     <div className="form-group">

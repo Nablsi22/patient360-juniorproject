@@ -122,6 +122,14 @@
   margin-bottom: 20px;
 }
 
+.radio-group {
+  display: flex;
+  gap: 40px;
+  justify-content: right;  /* ← Centers the options */
+
+}
+
+
 .form-label {
   display: block;
   margin-bottom: 8px;

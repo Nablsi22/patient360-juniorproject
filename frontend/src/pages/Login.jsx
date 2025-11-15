@@ -44,26 +44,26 @@ const Login = () => {
 
   const teamMembers = [
     {
-      name: "د. أحمد محمود",
+      name: "معاذ جبري",
       role: "المدير التنفيذي",
       image: "👨‍⚕️",
       bio: "خبرة 15 عاماً في التحول الرقمي الصحي"
     },
     {
-      name: "د. سارة العلي",
-      role: "مديرة التطوير",
+      name: "أنس النابلسي",
+      role: "مدير التطوير",
       image: "👩‍⚕️",
-      bio: "متخصصة في أنظمة المعلومات الطبية"
+      bio: "متخصص في أنظمة المعلومات الطبية"
     },
     {
-      name: "م. خالد حسن",
+      name: "علي راعي",
       role: "مدير التقنية",
       image: "👨‍💻",
       bio: "خبير في الأمن السيبراني والبنية التحتية"
     },
     {
-      name: "أ. ليلى أحمد",
-      role: "مديرة العمليات",
+      name: "كنان المجذوب",
+      role: "مدير العمليات",
       image: "👩‍💼",
       bio: "رائدة في تحسين العمليات الصحية"
     }
@@ -268,19 +268,17 @@ const Login = () => {
                 وفعالة للأطباء والمرضى على حد سواء.
               </p>
               <p>
-                منذ تأسيسنا، ساعدنا أكثر من 500 مؤسسة صحية في تحسين كفاءتها التشغيلية وتقديم 
-                رعاية أفضل لأكثر من مليون مريض. نؤمن بأن التكنولوجيا يمكن أن تحدث فرقاً حقيقياً 
-                في حياة الناس.
+                 نأمل تطبيق هذا المشروع على كامل النطاق الطبي في أراضي في الجمهورية العربية السورية تحت رعاية وزارة الصحة.
               </p>
               
               <div className="stats-grid">
                 <div className="stat-card">
                   <div className="stat-number">500+</div>
-                  <div className="stat-label">مؤسسة صحية</div>
+                  <div className="stat-label">مؤسسة صحية مشتركة</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-number">1M+</div>
-                  <div className="stat-label">مريض مخدوم</div>
+                  <div className="stat-label">مريض مخدوم بعد الإطلاق</div>
                 </div>
                 <div className="stat-card">
                   <div className="stat-number">99.9%</div>
@@ -457,15 +455,13 @@ const Login = () => {
               <div className="info-card">
                 <div className="info-icon">📍</div>
                 <h3>العنوان</h3>
-                <p>الرياض، المملكة العربية السعودية</p>
-                <p>حي الأعمال، شارع الملك فهد</p>
+                <p>مشروع دمر , دمشق , سوريا</p>
               </div>
               
               <div className="info-card">
                 <div className="info-icon">📞</div>
                 <h3>الهاتف</h3>
-                <p dir="ltr">+966 11 234 5678</p>
-                <p dir="ltr">+966 50 123 4567</p>
+                <p dir="ltr">+963933527091</p>
               </div>
               
               <div className="info-card">
@@ -540,7 +536,7 @@ const Login = () => {
           <div className="footer-section">
             <h3 className="footer-title">Patient 360°</h3>
             <p className="footer-description">
-              منصة متكاملة لإدارة الرعاية الصحية، نوفر حلولاً ذكية للمؤسسات الطبية
+              منصة متكاملة لإدارة الرعاية الصحية، نوفر حلولاً ذكية للمؤسسات الطبية.
             </p>
             <div className="social-links">
               <a href="#" className="social-icon">f</a>
@@ -561,20 +557,187 @@ const Login = () => {
           </div>
 
           <div className="footer-section">
-            <h3 className="footer-title">الدعم</h3>
-            <div className="footer-links">
-              <a href="#" className="footer-link">مركز المساعدة</a>
-              <a href="#" className="footer-link">الأسئلة الشائعة</a>
-              <a href="#" className="footer-link">سياسة الخصوصية</a>
-              <a href="#" className="footer-link">الشروط والأحكام</a>
-            </div>
           </div>
+        </div>
+
+        {/* Animated Heart Pulse Logo - TRUE LEFT SIDE - EXACT NAVBAR COPY */}
+        <div className="footer-animated-logo">
+          <div className="footer-heart-pulse-container">
+            <svg className="footer-heart-pulse-svg" viewBox="0 0 50 25" xmlns="http://www.w3.org/2000/svg">
+              <defs>
+                <linearGradient id="footerPulseGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                  <stop offset="0%" stopColor="#a23f97" stopOpacity="0.6"/>
+                  <stop offset="50%" stopColor="#ff4444" stopOpacity="1"/>
+                  <stop offset="100%" stopColor="#a23f97ff" stopOpacity="0.6"/>
+                </linearGradient>
+              </defs>
+              <path 
+                className="footer-pulse-line" 
+                d="M2,12.5 Q6,12.5 8,8 T12,12.5 T16,8 T20,12.5 T24,8 T28,12.5 T32,8 T36,12.5 T40,8 T44,12.5 L48,12.5" 
+                fill="none" 
+                stroke="url(#footerPulseGradient)" 
+                strokeWidth="2"
+              />
+              <circle className="footer-pulse-dot" cx="2" cy="12.5" r="2" fill="#ff4444"/>
+            </svg>
+          </div>
+          <span className="footer-brand-text">
+            PATIENT 360<span className="footer-degree-symbol">°</span>
+          </span>
         </div>
 
         <div className="footer-bottom">
           جميع الحقوق محفوظة © 2024 Patient 360°. تم التطوير بكل فخر
         </div>
       </footer>
+
+      <style jsx>{`
+        /* Import the exact navbar fonts */
+        @import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&display=swap');
+
+        /* Footer positioning */
+        .footer {
+          position: relative;
+        }
+
+        .footer-content {
+          display: grid;
+          grid-template-columns: 1fr 1fr 1fr;
+          gap: 2rem;
+          align-items: center;
+        }
+
+        /* Animated Heart Pulse Logo - EXACT NAVBAR COPY */
+        .footer-animated-logo {
+          position: absolute;
+          left: 13rem;
+          top: 44%;
+          transform: translateY(-50%);
+          z-index: 10;
+          display: flex;
+          align-items: center;
+        }
+
+        /* EXACT navbar container styling - BIGGER SIZE */
+        .footer-heart-pulse-container {
+          width: 80px;
+          height: 40px;
+          margin-right: 20px;
+          display: flex;
+          align-items: center;
+          overflow: visible;
+        }
+
+        /* EXACT navbar SVG styling - BIGGER SIZE */
+        .footer-heart-pulse-svg {
+          width: 100%;
+          height: 100%;
+          overflow: visible;
+        }
+
+        /* EXACT navbar pulse line animation */
+        .footer-pulse-line {
+          stroke-dasharray: 120;
+          stroke-dashoffset: 120;
+          animation: footerDrawPulse 2.5s ease-in-out infinite;
+        }
+
+        /* EXACT navbar pulse dot animation */
+        .footer-pulse-dot {
+          animation: footerMoveDot 2.5s ease-in-out infinite;
+          filter: drop-shadow(0 0 3px rgba(162, 63, 151, 0.5));
+        }
+
+        /* EXACT navbar keyframe animations */
+        @keyframes footerDrawPulse {
+          0% { stroke-dashoffset: 120; opacity: 0.3; }
+          40% { stroke-dashoffset: 0; opacity: 1; }
+          100% { stroke-dashoffset: -120; opacity: 0.3; }
+        }
+
+        @keyframes footerMoveDot {
+          0% { cx: 2; opacity: 0; }
+          10% { opacity: 1; }
+          90% { opacity: 1; }
+          100% { cx: 48; opacity: 0; }
+        }
+
+        /* EXACT navbar brand text styling - BIGGER SIZE */
+        .footer-brand-text {
+          color: white;
+          font-family: 'Inter', sans-serif;
+          font-size: 2.2rem;
+          font-weight: 800;
+          letter-spacing: -0.5px;
+          text-transform: uppercase;
+          display: inline-flex;
+          align-items: baseline;
+          cursor: pointer;
+        }
+
+        /* EXACT navbar degree symbol styling - BIGGER SIZE */
+        .footer-degree-symbol {
+          font-size: 0.7em;
+          vertical-align: super;
+          margin-left: 2px;
+          animation: footerFlash 1.5s ease-in-out infinite;
+        }
+
+        /* EXACT navbar flash animation */
+        @keyframes footerFlash {
+          0%, 100% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0;
+          }
+        }
+
+        /* Responsive adjustments */
+        @media (max-width: 768px) {
+          .footer-animated-logo {
+            position: relative;
+            left: auto;
+            top: auto;
+            transform: none;
+            text-align: center;
+            margin-bottom: 20px;
+            order: -1;
+            justify-content: center;
+          }
+          
+          .footer-content {
+            grid-template-columns: 1fr;
+            text-align: center;
+          }
+          
+          .footer-heart-pulse-container {
+            width: 60px;
+            height: 30px;
+            margin-right: 15px;
+          }
+          
+          .footer-brand-text {
+            font-size: 1.8rem;
+          }
+        }
+
+        @media (max-width: 1024px) {
+          .footer-animated-logo {
+            left: 1rem;
+          }
+          
+          .footer-heart-pulse-container {
+            width: 70px;
+            height: 35px;
+            margin-right: 18px;
+          }
+          
+          .footer-brand-text {
+            font-size: 2rem;
+          }
+        }
+      `}</style>
     </div>
   );
 };
