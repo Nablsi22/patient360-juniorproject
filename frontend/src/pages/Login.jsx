@@ -8,12 +8,16 @@ const Login = () => {
   const [currentSlide, setCurrentSlide] = useState(0);
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [isLoading, setIsLoading] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     email: '',
     phone: '',
     message: ''
   });
+
+  // API Base URL - Update this to match your backend server
+  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
   const features = [
     {
@@ -111,49 +115,164 @@ const Login = () => {
 
   // Check if user is already logged in
   useEffect(() => {
-    const currentUser = localStorage.getItem('currentUser');
-    if (currentUser) {
-      const user = JSON.parse(currentUser);
-      // User is already logged in, redirect to their role-specific dashboard
-      const dashboardRoutes = {
-        'doctor': '/doctor/dashboard',
-        'patient': '/patient/dashboard',
-        'pharmacist': '/pharmacist/dashboard',
-        'laboratory': '/laboratory/dashboard'
-      };
-      navigate(dashboardRoutes[user.role] || '/');
-    }
-  }, [navigate]);
+    const checkAuthStatus = async () => {
+      const token = localStorage.getItem('authToken');
+      const currentUser = localStorage.getItem('currentUser');
+      
+      if (token && currentUser) {
+        try {
+          const user = JSON.parse(currentUser);
+          // Verify token is still valid
+          const response = await fetch(`${API_BASE_URL}/auth/verify`, {
+            headers: {
+              'Authorization': `Bearer ${token}`
+            }
+          });
 
-  const handleLogin = (e) => {
+          if (response.ok) {
+            // Token is valid, redirect to dashboard
+            const dashboardRoutes = {
+              'doctor': '/doctor/dashboard',
+              'patient': '/patient/dashboard',
+              'admin': '/admin/dashboard'
+            };
+            
+            // Get primary role (first role in array)
+            const primaryRole = user.roles && user.roles[0];
+            navigate(dashboardRoutes[primaryRole] || '/');
+          } else {
+            // Token invalid, clear storage
+            localStorage.removeItem('authToken');
+            localStorage.removeItem('currentUser');
+          }
+        } catch (error) {
+          console.error('Auth verification error:', error);
+          localStorage.removeItem('authToken');
+          localStorage.removeItem('currentUser');
+        }
+      }
+    };
+
+    checkAuthStatus();
+  }, [navigate, API_BASE_URL]);
+
+  /**
+   * Handle user login with MongoDB backend
+   * Authenticates user and retrieves complete profile data
+   */
+  const handleLogin = async (e) => {
     e.preventDefault();
+    setIsLoading(true);
     
-    // Get all users from localStorage
-    const users = JSON.parse(localStorage.getItem('users') || '[]');
-    
-    // Find user with matching email and password
-    const user = users.find(u => u.email === email && u.password === password);
-    
-    if (user) {
-      // Login successful
+    try {
+      // Call backend login API endpoint
+      const response = await fetch(`${API_BASE_URL}/auth/login`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          email: email.trim(),
+          password: password
+        })
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success) {
+        // Login successful - Backend returns:
+        // {
+        //   success: true,
+        //   token: "JWT_TOKEN",
+        //   user: {
+        //     accountId: "...",
+        //     email: "...",
+        //     roles: ["patient", "doctor"],
+        //     isActive: true,
+        //     personId: "...",
+        //     person: { firstName, lastName, nationalId, ... },
+        //     roleData: { patient: {...}, doctor: {...} }
+        //   }
+        // }
+
+        // Store authentication token
+        localStorage.setItem('authToken', data.token);
+        
+        // Store user data
+        const userData = {
+          accountId: data.user.accountId,
+          email: data.user.email,
+          roles: data.user.roles,
+          isActive: data.user.isActive,
+          personId: data.user.personId,
+          firstName: data.user.person.firstName,
+          lastName: data.user.person.lastName,
+          nationalId: data.user.person.nationalId,
+          phoneNumber: data.user.person.phoneNumber,
+          dateOfBirth: data.user.person.dateOfBirth,
+          gender: data.user.person.gender,
+          address: data.user.person.address,
+          roleData: data.user.roleData // Contains patient/doctor/admin specific data
+        };
+        
+        localStorage.setItem('currentUser', JSON.stringify(userData));
+        
+        console.log('✅ Login successful:', {
+          email: userData.email,
+          roles: userData.roles,
+          name: `${userData.firstName} ${userData.lastName}`
+        });
+
+        // Update last login time on backend (fire and forget)
+        fetch(`${API_BASE_URL}/auth/update-last-login`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${data.token}`
+          }
+        }).catch(err => console.warn('Failed to update last login:', err));
+        
+        // Navigate to role-specific dashboard
+        const dashboardRoutes = {
+          'doctor': '/doctor/dashboard',
+          'patient': '/patient/dashboard',
+          'admin': '/admin/dashboard'
+        };
+        
+        // Get primary role (first role in roles array)
+        const primaryRole = userData.roles[0];
+        const targetRoute = dashboardRoutes[primaryRole] || '/dashboard';
+        
+        // Small delay for better UX
+        setTimeout(() => {
+          navigate(targetRoute);
+        }, 300);
+        
+      } else {
+        // Login failed - show error message
+        const errorMessage = data.message || 'فشل تسجيل الدخول';
+        
+        if (response.status === 401) {
+          alert('❌ البريد الإلكتروني أو كلمة المرور غير صحيحة\n\nتأكد من:\n- كتابة البريد الإلكتروني بشكل صحيح\n- كتابة كلمة المرور بشكل صحيح\n- أن الحساب مفعّل ونشط');
+        } else if (response.status === 403) {
+          alert('❌ الحساب غير مفعّل\n\nالرجاء التواصل مع الإدارة لتفعيل حسابك');
+        } else if (response.status === 404) {
+          alert('❌ البريد الإلكتروني غير مسجل\n\nالرجاء إنشاء حساب جديد من صفحة التسجيل');
+        } else {
+          alert(`❌ ${errorMessage}\n\nالرجاء المحاولة مرة أخرى`);
+        }
+      }
+    } catch (error) {
+      console.error('Login error:', error);
       
-      // Store current user in localStorage
-      localStorage.setItem('currentUser', JSON.stringify(user));
-      
-      console.log('Logged in user:', user);
-      
-      // Navigate to role-specific dashboard
-      const dashboardRoutes = {
-        'doctor': '/doctor/dashboard',
-        'patient': '/patient/dashboard',
-        'pharmacist': '/pharmacist/dashboard',
-        'laboratory': '/laboratory/dashboard'
-      };
-      
-      navigate(dashboardRoutes[user.role] || '/dashboard');
-    } else {
-      // Login failed
-      alert('❌ البريد الإلكتروني أو كلمة المرور غير صحيحة\n\nتأكد من:\n- كتابة البريد الإلكتروني بشكل صحيح\n- كتابة كلمة المرور بشكل صحيح\n- إنشاء حساب أولاً من صفحة التسجيل');
+      // Check if backend is unreachable
+      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
+        alert('❌ تعذر الاتصال بالخادم\n\nالرجاء التحقق من:\n- اتصال الإنترنت\n- أن الخادم يعمل بشكل صحيح\n- إعدادات الشبكة');
+      } else {
+        alert('❌ حدث خطأ غير متوقع\n\nالرجاء المحاولة مرة أخرى لاحقاً');
+      }
+    } finally {
+      setIsLoading(false);
     }
   };
 
@@ -186,6 +305,7 @@ const Login = () => {
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
                     required
+                    disabled={isLoading}
                     dir="ltr"
                   />
                 </div>
@@ -199,6 +319,7 @@ const Login = () => {
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
                     required
+                    disabled={isLoading}
                     dir="ltr"
                   />
                 </div>
@@ -207,8 +328,16 @@ const Login = () => {
                   <a href="#" className="forgot-link">هل نسيت كلمة المرور؟</a>
                 </div>
 
-                <button type="submit" className="login-button">
-                  تسجيل الدخول
+                <button 
+                  type="submit" 
+                  className="login-button"
+                  disabled={isLoading}
+                  style={{
+                    opacity: isLoading ? 0.7 : 1,
+                    cursor: isLoading ? 'not-allowed' : 'pointer'
+                  }}
+                >
+                  {isLoading ? 'جارٍ تسجيل الدخول...' : 'تسجيل الدخول'}
                 </button>
               </form>
 
