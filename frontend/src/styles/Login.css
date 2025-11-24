@@ -5,7 +5,160 @@
   background: #ffffff;
 }
 
-/* Hero Section */
+/* ============================================
+   MODAL COMPONENT STYLES
+   ============================================ */
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(0, 0, 0, 0.6);
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  z-index: 9999;
+  animation: modalFadeIn 0.3s ease-in-out;
+  backdrop-filter: blur(4px);
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.modal-container {
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
+  max-width: 500px;
+  width: 90%;
+  max-height: 90vh;
+  overflow-y: auto;
+  animation: modalSlideUp 0.3s ease-out;
+  direction: rtl;
+}
+
+@keyframes modalSlideUp {
+  from {
+    transform: translateY(50px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
+.modal-header {
+  padding: 30px 30px 20px;
+  text-align: center;
+  border-bottom: 1px solid #e5e7eb;
+}
+
+.modal-header.success {
+  background: linear-gradient(135deg, #125c7a 0%, #a23f97 100%);
+  border-radius: 16px 16px 0 0;
+  color: white;
+}
+
+.modal-header.error {
+  background: linear-gradient(135deg, #ef4444 0%, #dc2626 100%);
+  border-radius: 16px 16px 0 0;
+  color: white;
+}
+
+.modal-icon {
+  width: 70px;
+  height: 70px;
+  margin: 0 auto 20px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 40px;
+  font-weight: bold;
+  animation: modalIconScale 0.5s ease-out;
+  background-color: rgba(255, 255, 255, 0.25);
+  color: white;
+  border: 3px solid rgba(255, 255, 255, 0.5);
+}
+
+@keyframes modalIconScale {
+  0% {
+    transform: scale(0);
+  }
+  50% {
+    transform: scale(1.1);
+  }
+  100% {
+    transform: scale(1);
+  }
+}
+
+.modal-title {
+  font-size: 24px;
+  font-weight: 700;
+  margin: 0;
+  color: white;
+  font-family: 'Cairo', sans-serif;
+}
+
+.modal-body {
+  padding: 30px;
+}
+
+.modal-message {
+  font-size: 16px;
+  line-height: 1.8;
+  color: #374151;
+  margin: 0;
+  white-space: pre-line;
+  text-align: center;
+  font-family: 'Cairo', sans-serif;
+}
+
+.modal-footer {
+  padding: 20px 30px 30px;
+  text-align: center;
+}
+
+.modal-button {
+  border: none;
+  border-radius: 12px;
+  padding: 14px 40px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  font-family: 'Cairo', sans-serif;
+  min-width: 150px;
+}
+
+.modal-button.primary {
+  background: linear-gradient(135deg, #125c7a 0%, #a23f97 100%);
+  color: white;
+  box-shadow: 0 4px 15px rgba(18, 92, 122, 0.3);
+}
+
+.modal-button.primary:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 6px 20px rgba(162, 63, 151, 0.4);
+}
+
+.modal-button.primary:active {
+  transform: translateY(0);
+  box-shadow: 0 2px 10px rgba(18, 92, 122, 0.3);
+}
+
+/* ============================================
+   HERO SECTION
+   ============================================ */
 .hero-section {
   min-height: 100vh;
   padding-top: 70px;
@@ -893,6 +1046,11 @@
   .stats-grid {
     grid-template-columns: 1fr;
   }
+  
+  .modal-container {
+    width: 95%;
+    margin: 20px;
+  }
 }
 
 /* Smooth Scroll */
@@ -967,4 +1125,23 @@ html {
 .form-input:disabled {
   background-color: #f3f4f6;
   cursor: not-allowed;
+}
+
+/* Accessibility */
+.modal-button:focus,
+.login-button:focus,
+.form-input:focus {
+  outline: 3px solid #a23f97;
+  outline-offset: 2px;
+}
+
+/* Reduced motion for accessibility */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }

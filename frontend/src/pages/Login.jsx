@@ -16,8 +16,14 @@ const Login = () => {
     message: ''
   });
 
-  // API Base URL - Update this to match your backend server
-  const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
+  // Modal state
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: '', // 'success' or 'error'
+    title: '',
+    message: '',
+    onClose: null
+  });
 
   const features = [
     {
@@ -115,177 +121,200 @@ const Login = () => {
 
   // Check if user is already logged in
   useEffect(() => {
-    const checkAuthStatus = async () => {
-      const token = localStorage.getItem('authToken');
-      const currentUser = localStorage.getItem('currentUser');
-      
-      if (token && currentUser) {
-        try {
-          const user = JSON.parse(currentUser);
-          // Verify token is still valid
-          const response = await fetch(`${API_BASE_URL}/auth/verify`, {
-            headers: {
-              'Authorization': `Bearer ${token}`
-            }
-          });
-
-          if (response.ok) {
-            // Token is valid, redirect to dashboard
-            const dashboardRoutes = {
-              'doctor': '/doctor/dashboard',
-              'patient': '/patient/dashboard',
-              'admin': '/admin/dashboard'
-            };
-            
-            // Get primary role (first role in array)
-            const primaryRole = user.roles && user.roles[0];
-            navigate(dashboardRoutes[primaryRole] || '/');
-          } else {
-            // Token invalid, clear storage
-            localStorage.removeItem('authToken');
-            localStorage.removeItem('currentUser');
-          }
-        } catch (error) {
-          console.error('Auth verification error:', error);
-          localStorage.removeItem('authToken');
-          localStorage.removeItem('currentUser');
+    const currentUser = localStorage.getItem('currentUser');
+    
+    if (currentUser) {
+      try {
+        const user = JSON.parse(currentUser);
+        
+        // Redirect based on role
+        const dashboardRoutes = {
+          'doctor': '/doctor-dashboard',
+          'patient': '/patient-dashboard',
+          'admin': '/admin-dashboard'
+        };
+        
+        const primaryRole = user.role || (user.roles && user.roles[0]);
+        if (primaryRole && dashboardRoutes[primaryRole]) {
+          navigate(dashboardRoutes[primaryRole]);
         }
+      } catch (error) {
+        console.error('Error parsing user data:', error);
+        localStorage.removeItem('currentUser');
       }
-    };
-
-    checkAuthStatus();
-  }, [navigate, API_BASE_URL]);
+    }
+  }, [navigate]);
 
   /**
-   * Handle user login with MongoDB backend
-   * Authenticates user and retrieves complete profile data
+   * Opens modal dialog
+   */
+  const openModal = (type, title, message, onClose = null) => {
+    setModal({ isOpen: true, type, title, message, onClose });
+  };
+
+  /**
+   * Closes modal dialog
+   */
+  const closeModal = () => {
+    if (modal.onClose) {
+      modal.onClose();
+    }
+    setModal({ isOpen: false, type: '', title: '', message: '', onClose: null });
+  };
+
+  /**
+   * Handle user login with localStorage
+   * Works with accounts created through SignUp page
    */
   const handleLogin = async (e) => {
     e.preventDefault();
     setIsLoading(true);
     
     try {
-      // Call backend login API endpoint
-      const response = await fetch(`${API_BASE_URL}/auth/login`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          email: email.trim(),
-          password: password
-        })
+      // Simulate API call delay for better UX
+      await new Promise(resolve => setTimeout(resolve, 800));
+
+      // Get users from localStorage
+      const users = JSON.parse(localStorage.getItem('users') || '[]');
+
+      // Find user with matching email
+      const user = users.find(u => u.email === email.trim());
+
+      // Check if user exists
+      if (!user) {
+        setIsLoading(false);
+        openModal(
+          'error',
+          'خطأ في تسجيل الدخول',
+          'البريد الإلكتروني غير مسجل.\n\nالرجاء إنشاء حساب جديد من صفحة التسجيل.'
+        );
+        return;
+      }
+
+      // Check if password matches
+      if (user.password !== password) {
+        setIsLoading(false);
+        openModal(
+          'error',
+          'خطأ في تسجيل الدخول',
+          'كلمة المرور غير صحيحة.\n\nتأكد من كتابة كلمة المرور بشكل صحيح.'
+        );
+        return;
+      }
+
+      // Check if account is active (if the field exists)
+      if (user.account && user.account.isActive === false) {
+        setIsLoading(false);
+        openModal(
+          'error',
+          'الحساب معطل',
+          'هذا الحساب معطل.\n\nالرجاء التواصل مع الإدارة لتفعيل حسابك.'
+        );
+        return;
+      }
+
+      // Successful login - Set current user
+      const currentUser = {
+        id: user.id,
+        email: user.email,
+        role: user.role,
+        firstName: user.firstName || user.person?.firstName,
+        lastName: user.lastName || user.person?.lastName,
+        phoneNumber: user.phoneNumber || user.person?.phoneNumber,
+        nationalId: user.nationalId || user.person?.nationalId,
+        dateOfBirth: user.dateOfBirth || user.person?.dateOfBirth,
+        gender: user.gender || user.person?.gender,
+        address: user.address || user.person?.address
+      };
+
+      localStorage.setItem('currentUser', JSON.stringify(currentUser));
+
+      // Update last login time
+      user.account = user.account || {};
+      user.account.lastLogin = new Date().toISOString();
+      
+      const userIndex = users.findIndex(u => u.email === email.trim());
+      users[userIndex] = user;
+      localStorage.setItem('users', JSON.stringify(users));
+
+      setIsLoading(false);
+
+      // Show success modal and route based on role
+      const roleLabels = {
+        patient: 'مريض',
+        doctor: 'طبيب',
+        admin: 'مسؤول النظام'
+      };
+
+      openModal(
+        'success',
+        'تم تسجيل الدخول بنجاح! ✅',
+        `مرحباً ${currentUser.firstName} ${currentUser.lastName}\n\nتم تسجيل دخولك كـ ${roleLabels[currentUser.role]}`,
+        () => {
+          // Route based on user role
+          const dashboardRoutes = {
+            'patient': '/patient-dashboard',
+            'doctor': '/doctor-dashboard',
+            'admin': '/admin-dashboard'
+          };
+          
+          navigate(dashboardRoutes[currentUser.role] || '/');
+        }
+      );
+
+      console.log('✅ Login successful:', {
+        email: currentUser.email,
+        role: currentUser.role,
+        name: `${currentUser.firstName} ${currentUser.lastName}`
       });
 
-      const data = await response.json();
-
-      if (response.ok && data.success) {
-        // Login successful - Backend returns:
-        // {
-        //   success: true,
-        //   token: "JWT_TOKEN",
-        //   user: {
-        //     accountId: "...",
-        //     email: "...",
-        //     roles: ["patient", "doctor"],
-        //     isActive: true,
-        //     personId: "...",
-        //     person: { firstName, lastName, nationalId, ... },
-        //     roleData: { patient: {...}, doctor: {...} }
-        //   }
-        // }
-
-        // Store authentication token
-        localStorage.setItem('authToken', data.token);
-        
-        // Store user data
-        const userData = {
-          accountId: data.user.accountId,
-          email: data.user.email,
-          roles: data.user.roles,
-          isActive: data.user.isActive,
-          personId: data.user.personId,
-          firstName: data.user.person.firstName,
-          lastName: data.user.person.lastName,
-          nationalId: data.user.person.nationalId,
-          phoneNumber: data.user.person.phoneNumber,
-          dateOfBirth: data.user.person.dateOfBirth,
-          gender: data.user.person.gender,
-          address: data.user.person.address,
-          roleData: data.user.roleData // Contains patient/doctor/admin specific data
-        };
-        
-        localStorage.setItem('currentUser', JSON.stringify(userData));
-        
-        console.log('✅ Login successful:', {
-          email: userData.email,
-          roles: userData.roles,
-          name: `${userData.firstName} ${userData.lastName}`
-        });
-
-        // Update last login time on backend (fire and forget)
-        fetch(`${API_BASE_URL}/auth/update-last-login`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${data.token}`
-          }
-        }).catch(err => console.warn('Failed to update last login:', err));
-        
-        // Navigate to role-specific dashboard
-        const dashboardRoutes = {
-          'doctor': '/doctor/dashboard',
-          'patient': '/patient/dashboard',
-          'admin': '/admin/dashboard'
-        };
-        
-        // Get primary role (first role in roles array)
-        const primaryRole = userData.roles[0];
-        const targetRoute = dashboardRoutes[primaryRole] || '/dashboard';
-        
-        // Small delay for better UX
-        setTimeout(() => {
-          navigate(targetRoute);
-        }, 300);
-        
-      } else {
-        // Login failed - show error message
-        const errorMessage = data.message || 'فشل تسجيل الدخول';
-        
-        if (response.status === 401) {
-          alert('❌ البريد الإلكتروني أو كلمة المرور غير صحيحة\n\nتأكد من:\n- كتابة البريد الإلكتروني بشكل صحيح\n- كتابة كلمة المرور بشكل صحيح\n- أن الحساب مفعّل ونشط');
-        } else if (response.status === 403) {
-          alert('❌ الحساب غير مفعّل\n\nالرجاء التواصل مع الإدارة لتفعيل حسابك');
-        } else if (response.status === 404) {
-          alert('❌ البريد الإلكتروني غير مسجل\n\nالرجاء إنشاء حساب جديد من صفحة التسجيل');
-        } else {
-          alert(`❌ ${errorMessage}\n\nالرجاء المحاولة مرة أخرى`);
-        }
-      }
     } catch (error) {
+      setIsLoading(false);
       console.error('Login error:', error);
       
-      // Check if backend is unreachable
-      if (error.message.includes('Failed to fetch') || error.message.includes('NetworkError')) {
-        alert('❌ تعذر الاتصال بالخادم\n\nالرجاء التحقق من:\n- اتصال الإنترنت\n- أن الخادم يعمل بشكل صحيح\n- إعدادات الشبكة');
-      } else {
-        alert('❌ حدث خطأ غير متوقع\n\nالرجاء المحاولة مرة أخرى لاحقاً');
-      }
-    } finally {
-      setIsLoading(false);
+      openModal(
+        'error',
+        'خطأ في النظام',
+        'حدث خطأ غير متوقع.\n\nالرجاء المحاولة مرة أخرى لاحقاً.'
+      );
     }
   };
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
     console.log('Contact form:', formData);
-    alert('تم إرسال رسالتك بنجاح!');
+    openModal(
+      'success',
+      'تم إرسال الرسالة',
+      'تم إرسال رسالتك بنجاح!\n\nسنتواصل معك قريباً.'
+    );
     setFormData({ name: '', email: '', phone: '', message: '' });
   };
 
   return (
     <div className="home-page">
       <Navbar />
+
+      {/* Modal Component */}
+      {modal.isOpen && (
+        <div className="modal-overlay" onClick={closeModal}>
+          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+            <div className={`modal-header ${modal.type}`}>
+              {modal.type === 'success' && <div className="modal-icon success-icon">✓</div>}
+              {modal.type === 'error' && <div className="modal-icon error-icon">✕</div>}
+              <h2 className="modal-title">{modal.title}</h2>
+            </div>
+            <div className="modal-body">
+              <p className="modal-message">{modal.message}</p>
+            </div>
+            <div className="modal-footer">
+              <button className="modal-button primary" onClick={modal.onClose || closeModal}>
+                حسناً
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       
       {/* Hero Section */}
       <section id="hero" className="hero-section">
