@@ -1,103 +1,267 @@
 // src/services/authService.js
-import axios from 'axios';
+/**
+ * Authentication Service
+ * 
+ * Handles all authentication operations:
+ * - Login
+ * - Register
+ * - Logout
+ * - Get current user
+ * 
+ * CURRENT: Uses localStorage
+ * FUTURE: Backend developer will replace with API calls
+ */
 
-// Get API URL from environment variables or use default
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
-const AUTH_API = `${API_URL}/auth`;
-
-// Configure axios defaults
-axios.defaults.headers.common['Content-Type'] = 'application/json';
-
-const authService = {
-  // Sign up new user
-  signup: async (userData) => {
-    try {
-      const response = await axios.post(`${AUTH_API}/signup`, userData);
-      return response.data;
-    } catch (error) {
-      if (error.response) {
-        // Server responded with error
-        throw error.response.data;
-      } else if (error.request) {
-        // Request made but no response
-        throw { message: 'لا يمكن الاتصال بالخادم. الرجاء التحقق من اتصال الإنترنت.' };
-      } else {
-        // Something else happened
-        throw { message: 'حدث خطأ غير متوقع' };
-      }
-    }
-  },
-
-  // Login user
-  login: async (email, password) => {
-    try {
-      const response = await axios.post(`${AUTH_API}/login`, { email, password });
+/**
+ * Login user
+ * 
+ * BACKEND API NEEDED:
+ * POST /api/auth/login
+ * Body: { email, password }
+ * Response: { success: true, user: {...}, token: "..." }
+ */
+export const login = async (email, password) => {
+  try {
+    // ========================================
+    // CURRENT IMPLEMENTATION (localStorage)
+    // ========================================
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    const user = users.find(u => u.email === email && u.password === password);
+    
+    if (user) {
+      // Remove password from user object for security
+      const { password, ...userWithoutPassword } = user;
+      localStorage.setItem('currentUser', JSON.stringify(userWithoutPassword));
       
-      if (response.data.success) {
-        // Store token and user info in localStorage
-        localStorage.setItem('token', response.data.token);
-        localStorage.setItem('user', JSON.stringify(response.data.user));
-        
-        // Set axios default authorization header
-        axios.defaults.headers.common['Authorization'] = `Bearer ${response.data.token}`;
-      }
-      
-      return response.data;
-    } catch (error) {
-      if (error.response) {
-        throw error.response.data;
-      } else if (error.request) {
-        throw { message: 'لا يمكن الاتصال بالخادم. الرجاء التحقق من اتصال الإنترنت.' };
-      } else {
-        throw { message: 'حدث خطأ غير متوقع' };
-      }
+      return {
+        success: true,
+        user: userWithoutPassword,
+        message: 'تم تسجيل الدخول بنجاح'
+      };
+    } else {
+      return {
+        success: false,
+        message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+      };
     }
-  },
-
-  // Logout user
-  logout: () => {
-    localStorage.removeItem('token');
-    localStorage.removeItem('user');
-    delete axios.defaults.headers.common['Authorization'];
-  },
-
-  // Get current user from localStorage
-  getCurrentUser: () => {
-    const userStr = localStorage.getItem('user');
-    return userStr ? JSON.parse(userStr) : null;
-  },
-
-  // Get stored token
-  getToken: () => {
-    return localStorage.getItem('token');
-  },
-
-  // Check if user is authenticated
-  isAuthenticated: () => {
-    return !!localStorage.getItem('token');
-  },
-
-  // Verify token with backend
-  verifyToken: async () => {
-    try {
-      const token = localStorage.getItem('token');
-      if (!token) return false;
-
-      axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-      const response = await axios.get(`${AUTH_API}/verify`);
-      return response.data.success;
-    } catch (error) {
-      // If token is invalid, logout user
-      authService.logout();
-      return false;
-    }
+    
+    // ========================================
+    // FUTURE IMPLEMENTATION (Backend API)
+    // ========================================
+    // const response = await fetch(`${API_URL}/api/auth/login`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify({ email, password })
+    // });
+    // 
+    // const data = await response.json();
+    // 
+    // if (data.success) {
+    //   localStorage.setItem('authToken', data.token);
+    //   localStorage.setItem('currentUser', JSON.stringify(data.user));
+    // }
+    // 
+    // return data;
+    
+  } catch (error) {
+    console.error('Login error:', error);
+    return {
+      success: false,
+      message: 'حدث خطأ أثناء تسجيل الدخول'
+    };
   }
 };
 
-// Set token in axios if it exists when app loads
-const token = authService.getToken();
-if (token) {
-  axios.defaults.headers.common['Authorization'] = `Bearer ${token}`;
-}
+/**
+ * Register new user
+ * 
+ * BACKEND API NEEDED:
+ * POST /api/auth/register
+ * Body: { email, password, firstName, lastName, nationalId, role, ... }
+ * Response: { success: true, user: {...}, token: "..." }
+ */
+export const register = async (userData) => {
+  try {
+    // ========================================
+    // CURRENT IMPLEMENTATION (localStorage)
+    // ========================================
+    const users = JSON.parse(localStorage.getItem('users') || '[]');
+    
+    // Check if email already exists
+    const existingUser = users.find(u => u.email === userData.email);
+    if (existingUser) {
+      return {
+        success: false,
+        message: 'البريد الإلكتروني مسجل مسبقاً'
+      };
+    }
+    
+    // Check if nationalId already exists
+    const existingNationalId = users.find(u => u.nationalId === userData.nationalId);
+    if (existingNationalId) {
+      return {
+        success: false,
+        message: 'الرقم الوطني مسجل مسبقاً'
+      };
+    }
+    
+    // Create new user
+    const newUser = {
+      id: Date.now(),
+      ...userData,
+      registrationDate: new Date().toISOString()
+    };
+    
+    users.push(newUser);
+    localStorage.setItem('users', JSON.stringify(users));
+    
+    // If patient, add to patients array
+    if (userData.role === 'patient') {
+      const patients = JSON.parse(localStorage.getItem('patients') || '[]');
+      patients.push(newUser);
+      localStorage.setItem('patients', JSON.stringify(patients));
+    }
+    
+    // Remove password from response
+    const { password, ...userWithoutPassword } = newUser;
+    
+    return {
+      success: true,
+      user: userWithoutPassword,
+      message: 'تم التسجيل بنجاح'
+    };
+    
+    // ========================================
+    // FUTURE IMPLEMENTATION (Backend API)
+    // ========================================
+    // const response = await fetch(`${API_URL}/api/auth/register`, {
+    //   method: 'POST',
+    //   headers: { 'Content-Type': 'application/json' },
+    //   body: JSON.stringify(userData)
+    // });
+    // 
+    // const data = await response.json();
+    // 
+    // if (data.success) {
+    //   localStorage.setItem('authToken', data.token);
+    //   localStorage.setItem('currentUser', JSON.stringify(data.user));
+    // }
+    // 
+    // return data;
+    
+  } catch (error) {
+    console.error('Register error:', error);
+    return {
+      success: false,
+      message: 'حدث خطأ أثناء التسجيل'
+    };
+  }
+};
 
-export default authService;
+/**
+ * Logout current user
+ * 
+ * BACKEND API NEEDED:
+ * POST /api/auth/logout
+ * Headers: { Authorization: "Bearer <token>" }
+ * Response: { success: true }
+ */
+export const logout = async () => {
+  try {
+    // ========================================
+    // CURRENT IMPLEMENTATION (localStorage)
+    // ========================================
+    localStorage.removeItem('currentUser');
+    
+    return {
+      success: true,
+      message: 'تم تسجيل الخروج بنجاح'
+    };
+    
+    // ========================================
+    // FUTURE IMPLEMENTATION (Backend API)
+    // ========================================
+    // const token = localStorage.getItem('authToken');
+    // 
+    // await fetch(`${API_URL}/api/auth/logout`, {
+    //   method: 'POST',
+    //   headers: {
+    //     'Authorization': `Bearer ${token}`
+    //   }
+    // });
+    // 
+    // localStorage.removeItem('authToken');
+    // localStorage.removeItem('currentUser');
+    // 
+    // return { success: true };
+    
+  } catch (error) {
+    console.error('Logout error:', error);
+    return {
+      success: false,
+      message: 'حدث خطأ أثناء تسجيل الخروج'
+    };
+  }
+};
+
+/**
+ * Get current logged-in user
+ * 
+ * BACKEND API NEEDED:
+ * GET /api/auth/me
+ * Headers: { Authorization: "Bearer <token>" }
+ * Response: { user: {...} }
+ */
+export const getCurrentUser = async () => {
+  try {
+    // ========================================
+    // CURRENT IMPLEMENTATION (localStorage)
+    // ========================================
+    const userStr = localStorage.getItem('currentUser');
+    return userStr ? JSON.parse(userStr) : null;
+    
+    // ========================================
+    // FUTURE IMPLEMENTATION (Backend API)
+    // ========================================
+    // const token = localStorage.getItem('authToken');
+    // 
+    // if (!token) {
+    //   return null;
+    // }
+    // 
+    // const response = await fetch(`${API_URL}/api/auth/me`, {
+    //   headers: {
+    //     'Authorization': `Bearer ${token}`
+    //   }
+    // });
+    // 
+    // const data = await response.json();
+    // return data.user;
+    
+  } catch (error) {
+    console.error('Get current user error:', error);
+    return null;
+  }
+};
+
+/**
+ * Check if user is authenticated
+ */
+export const isAuthenticated = () => {
+  // CURRENT: Check localStorage
+  return localStorage.getItem('currentUser') !== null;
+  
+  // FUTURE: Check token
+  // return localStorage.getItem('authToken') !== null;
+};
+
+/**
+ * Get auth token (for future API calls)
+ */
+export const getAuthToken = () => {
+  // CURRENT: No token system
+  return null;
+  
+  // FUTURE: Return token
+  // return localStorage.getItem('authToken');
+};

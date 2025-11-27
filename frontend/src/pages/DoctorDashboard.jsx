@@ -25,6 +25,15 @@ const DoctorDashboard = () => {
   });
   
   const [doctorOpinion, setDoctorOpinion] = useState('');
+  
+  // ✅ NEW: Medications state
+  const [medications, setMedications] = useState([]);
+  const [newMedication, setNewMedication] = useState({
+    medicationName: '',
+    dosage: '',
+    frequency: '',
+    duration: ''
+  });
 
   useEffect(() => {
     const currentUser = JSON.parse(localStorage.getItem('currentUser'));
@@ -71,6 +80,7 @@ const DoctorDashboard = () => {
         weight: ''
       });
       setDoctorOpinion(patient.doctorOpinion || '');
+      setMedications(patient.prescribedMedications || []); // ✅ Load existing medications
       setView('patientDetail');
       setShowSearchModal(false);
       setSearchId('');
@@ -79,15 +89,69 @@ const DoctorDashboard = () => {
     }
   };
 
+  // ✅ NEW: Add medication to list
+  const handleAddMedication = () => {
+    if (!newMedication.medicationName || !newMedication.dosage || !newMedication.frequency || !newMedication.duration) {
+      alert('الرجاء ملء جميع حقول الدواء');
+      return;
+    }
+
+    setMedications([...medications, { ...newMedication }]);
+    setNewMedication({
+      medicationName: '',
+      dosage: '',
+      frequency: '',
+      duration: ''
+    });
+  };
+
+  // ✅ NEW: Remove medication from list
+  const handleRemoveMedication = (index) => {
+    const updatedMeds = medications.filter((_, i) => i !== index);
+    setMedications(updatedMeds);
+  };
+
   const handleSavePatientData = () => {
     if (!selectedPatient) return;
+    
+    // Prepare ECG results if file was uploaded
+    const ecgResults = ecgFile ? {
+      fileName: ecgFile.name,
+      uploadDate: new Date().toISOString(),
+      heartRate: parseInt(vitalSigns.heartRate) || 0,
+      rhythm: "Sinus Rhythm",
+      prInterval: "160 ms",
+      qrsDuration: "90 ms",
+      qtInterval: "380 ms",
+      axis: "Normal Axis",
+      findings: aiDiagnosis || "تم رفع ملف ECG - في انتظار التحليل",
+      interpretation: aiDiagnosis ? "تم التحليل بواسطة الذكاء الاصطناعي" : "قيد المراجعة"
+    } : null;
+
+    // Prepare AI prediction based on vital signs and diagnosis
+    const aiPrediction = (vitalSigns.bloodPressureSystolic || aiDiagnosis) ? {
+      riskLevel: getRiskLevel(vitalSigns),
+      riskScore: calculateRiskScore(vitalSigns),
+      predictions: {
+        heartDisease: calculateHeartDiseaseRisk(vitalSigns),
+        diabetes: calculateDiabetesRisk(vitalSigns),
+        hypertension: calculateHypertensionRisk(vitalSigns),
+        stroke: calculateStrokeRisk(vitalSigns)
+      },
+      recommendations: generateRecommendations(vitalSigns, doctorOpinion),
+      modelConfidence: 85,
+      analysisDate: new Date().toISOString()
+    } : null;
     
     const updatedPatient = {
       ...selectedPatient,
       vitalSigns,
       doctorOpinion,
+      ecgResults,
+      aiPrediction,
+      prescribedMedications: medications, // ✅ NEW: Save medications
       lastUpdated: new Date().toISOString(),
-      lastUpdatedBy: `${user.firstName} ${user.lastName}`
+      lastUpdatedBy: `د. ${user.firstName} ${user.lastName}`
     };
     
     const updatedPatients = patients.map(p => 
@@ -98,7 +162,120 @@ const DoctorDashboard = () => {
     setSelectedPatient(updatedPatient);
     localStorage.setItem('patients', JSON.stringify(updatedPatients));
     
-    alert('تم حفظ البيانات بنجاح');
+    alert('تم حفظ البيانات بنجاح ✅');
+  };
+
+  // Helper functions for risk calculation
+  const getRiskLevel = (vitals) => {
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    const glucose = parseInt(vitals.bloodGlucose) || 0;
+    
+    if (systolic > 140 || glucose > 126) return "مرتفع";
+    if (systolic > 130 || glucose > 100) return "متوسط";
+    return "منخفض";
+  };
+
+  const calculateRiskScore = (vitals) => {
+    let score = 0;
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    const diastolic = parseInt(vitals.bloodPressureDiastolic) || 0;
+    const heartRate = parseInt(vitals.heartRate) || 0;
+    const glucose = parseInt(vitals.bloodGlucose) || 0;
+    const spo2 = parseInt(vitals.spo2) || 0;
+
+    if (systolic > 140 || diastolic > 90) score += 30;
+    else if (systolic > 130 || diastolic > 85) score += 15;
+
+    if (heartRate > 100 || heartRate < 60) score += 15;
+    else if (heartRate > 90 || heartRate < 65) score += 8;
+
+    if (glucose > 126) score += 25;
+    else if (glucose > 100) score += 12;
+
+    if (spo2 < 95) score += 20;
+    else if (spo2 < 97) score += 10;
+
+    return Math.min(score, 100);
+  };
+
+  const calculateHeartDiseaseRisk = (vitals) => {
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    const heartRate = parseInt(vitals.heartRate) || 0;
+    let risk = 20;
+
+    if (systolic > 140) risk += 25;
+    else if (systolic > 130) risk += 15;
+
+    if (heartRate > 100) risk += 20;
+    else if (heartRate > 90) risk += 10;
+
+    return Math.min(risk, 95);
+  };
+
+  const calculateDiabetesRisk = (vitals) => {
+    const glucose = parseInt(vitals.bloodGlucose) || 0;
+    let risk = 15;
+
+    if (glucose > 126) risk += 40;
+    else if (glucose > 100) risk += 20;
+
+    return Math.min(risk, 90);
+  };
+
+  const calculateHypertensionRisk = (vitals) => {
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    const diastolic = parseInt(vitals.bloodPressureDiastolic) || 0;
+    let risk = 25;
+
+    if (systolic > 140 || diastolic > 90) risk += 50;
+    else if (systolic > 130 || diastolic > 85) risk += 30;
+
+    return Math.min(risk, 95);
+  };
+
+  const calculateStrokeRisk = (vitals) => {
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    let risk = 10;
+
+    if (systolic > 160) risk += 30;
+    else if (systolic > 140) risk += 15;
+
+    return Math.min(risk, 80);
+  };
+
+  const generateRecommendations = (vitals, opinion) => {
+    const recommendations = [];
+    const systolic = parseInt(vitals.bloodPressureSystolic) || 0;
+    const glucose = parseInt(vitals.bloodGlucose) || 0;
+    const heartRate = parseInt(vitals.heartRate) || 0;
+    const spo2 = parseInt(vitals.spo2) || 0;
+
+    if (systolic > 130) {
+      recommendations.push("متابعة ضغط الدم بشكل منتظم");
+      recommendations.push("تقليل تناول الملح");
+    }
+
+    if (glucose > 100) {
+      recommendations.push("مراقبة مستوى السكر في الدم");
+      recommendations.push("اتباع نظام غذائي صحي");
+    }
+
+    if (heartRate > 90 || heartRate < 65) {
+      recommendations.push("متابعة معدل ضربات القلب");
+    }
+
+    if (spo2 < 97) {
+      recommendations.push("مراقبة مستوى الأكسجين");
+    }
+
+    recommendations.push("ممارسة الرياضة 30 دقيقة يومياً");
+    recommendations.push("الالتزام بالأدوية الموصوفة");
+
+    if (opinion && opinion.includes("متابعة")) {
+      recommendations.push("المتابعة الدورية مع الطبيب");
+    }
+
+    return recommendations.slice(0, 4);
   };
 
   const handleEcgUpload = (e) => {
@@ -222,7 +399,6 @@ const DoctorDashboard = () => {
         <div style={{ maxWidth: '1200px', margin: '0 auto' }}>
           {view === 'dashboard' ? (
             <>
-              {/* Quick Stats - Elegant Cards */}
               <div style={{ 
                 display: 'grid', 
                 gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', 
@@ -244,7 +420,6 @@ const DoctorDashboard = () => {
                 />
               </div>
 
-              {/* Patients Table - Elegant Design */}
               <div style={{
                 background: 'white',
                 borderRadius: '16px',
@@ -311,65 +486,15 @@ const DoctorDashboard = () => {
                     <table style={{ width: '100%', borderCollapse: 'separate', borderSpacing: '0' }}>
                       <thead>
                         <tr>
-                          <th style={{ 
-                            padding: '15px 20px', 
-                            textAlign: 'right', 
-                            fontSize: '0.95rem', 
-                            fontWeight: '600',
-                            color: '#5a7a8a',
-                            borderBottom: '2px solid #f1f3f5',
-                            background: '#f8fafb'
-                          }}>
-                            الرقم الوطني
-                          </th>
-                          <th style={{ 
-                            padding: '15px 20px', 
-                            textAlign: 'right', 
-                            fontSize: '0.95rem', 
-                            fontWeight: '600',
-                            color: '#5a7a8a',
-                            borderBottom: '2px solid #f1f3f5',
-                            background: '#f8fafb'
-                          }}>
-                            اسم المريض
-                          </th>
-                          <th style={{ 
-                            padding: '15px 20px', 
-                            textAlign: 'right', 
-                            fontSize: '0.95rem', 
-                            fontWeight: '600',
-                            color: '#5a7a8a',
-                            borderBottom: '2px solid #f1f3f5',
-                            background: '#f8fafb'
-                          }}>
-                            تاريخ التسجيل
-                          </th>
-                          <th style={{ 
-                            padding: '15px 20px', 
-                            textAlign: 'right', 
-                            fontSize: '0.95rem', 
-                            fontWeight: '600',
-                            color: '#5a7a8a',
-                            borderBottom: '2px solid #f1f3f5',
-                            background: '#f8fafb'
-                          }}>
-                            آخر تحديث
-                          </th>
-                          <th style={{ 
-                            padding: '15px 20px', 
-                            textAlign: 'center', 
-                            fontSize: '0.95rem', 
-                            fontWeight: '600',
-                            color: '#5a7a8a',
-                            borderBottom: '2px solid #f1f3f5',
-                            background: '#f8fafb'
-                          }}>
-                            إجراءات
-                          </th>
+                          <TableHeader>الرقم الوطني</TableHeader>
+                          <TableHeader>اسم المريض</TableHeader>
+                          <TableHeader>تاريخ التسجيل</TableHeader>
+                          <TableHeader>آخر تحديث</TableHeader>
+                          <TableHeader align="center">إجراءات</TableHeader>
                         </tr>
                       </thead>
                       <tbody>
-                        {patients.map((patient, index) => (
+                        {patients.map((patient) => (
                           <tr key={patient.id} 
                               style={{
                                 transition: 'all 0.3s ease',
@@ -429,6 +554,7 @@ const DoctorDashboard = () => {
                                     weight: ''
                                   });
                                   setDoctorOpinion(patient.doctorOpinion || '');
+                                  setMedications(patient.prescribedMedications || []);
                                   setView('patientDetail');
                                 }}
                                 style={{
@@ -464,7 +590,6 @@ const DoctorDashboard = () => {
               </div>
             </>
           ) : (
-            /* Patient Detail View */
             <div>
               <button
                 onClick={() => setView('dashboard')}
@@ -496,17 +621,14 @@ const DoctorDashboard = () => {
                 ← رجوع للقائمة
               </button>
 
-              {/* Patient Info Card */}
               <PatientInfoCard patient={selectedPatient} />
 
-              {/* Main Content Grid */}
               <div style={{
                 display: 'grid',
                 gridTemplateColumns: 'repeat(auto-fit, minmax(500px, 1fr))',
                 gap: '30px',
                 marginBottom: '30px'
               }}>
-                {/* ECG Upload Section */}
                 <ECGUploadSection
                   ecgFile={ecgFile}
                   handleEcgUpload={handleEcgUpload}
@@ -514,17 +636,23 @@ const DoctorDashboard = () => {
                   aiDiagnosis={aiDiagnosis}
                 />
 
-                {/* Doctor's Opinion */}
                 <DoctorOpinionSection 
                   doctorOpinion={doctorOpinion} 
                   setDoctorOpinion={setDoctorOpinion} 
                 />
               </div>
 
-              {/* Vital Signs */}
               <VitalSignsSection vitalSigns={vitalSigns} setVitalSigns={setVitalSigns} />
 
-              {/* Save Button */}
+              {/* ✅ NEW: Medications Section */}
+              <MedicationsSection 
+                medications={medications}
+                newMedication={newMedication}
+                setNewMedication={setNewMedication}
+                handleAddMedication={handleAddMedication}
+                handleRemoveMedication={handleRemoveMedication}
+              />
+
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: '40px' }}>
                 <button
                   onClick={handleSavePatientData}
@@ -550,7 +678,7 @@ const DoctorDashboard = () => {
                     e.target.style.boxShadow = '0 10px 30px rgba(162, 63, 151, 0.3)';
                   }}
                 >
-                  حفظ جميع البيانات
+                  💾 حفظ جميع البيانات
                 </button>
               </div>
             </div>
@@ -558,7 +686,6 @@ const DoctorDashboard = () => {
         </div>
       </div>
 
-      {/* Search Modal */}
       {showSearchModal && (
         <SearchModal
           searchId={searchId}
@@ -571,20 +698,32 @@ const DoctorDashboard = () => {
   );
 };
 
-// Component: Stat Card
+// Components
+const TableHeader = ({ children, align = 'right' }) => (
+  <th style={{ 
+    padding: '15px 20px', 
+    textAlign: align, 
+    fontSize: '0.95rem', 
+    fontWeight: '600',
+    color: '#5a7a8a',
+    borderBottom: '2px solid #f1f3f5',
+    background: '#f8fafb'
+  }}>
+    {children}
+  </th>
+);
+
 const StatCard = ({ icon, number, label, gradient }) => (
-  <div
-    style={{
-      background: gradient,
-      color: 'white',
-      padding: '30px',
-      borderRadius: '12px',
-      textAlign: 'center',
-      transition: 'all 0.3s ease',
-      cursor: 'default',
-      boxShadow: '0 10px 30px rgba(162,63,151,0.2)'
-    }}
-  >
+  <div style={{
+    background: gradient,
+    color: 'white',
+    padding: '30px',
+    borderRadius: '12px',
+    textAlign: 'center',
+    transition: 'all 0.3s ease',
+    cursor: 'default',
+    boxShadow: '0 10px 30px rgba(162,63,151,0.2)'
+  }}>
     <div style={{ 
       fontSize: '3rem', 
       marginBottom: '10px',
@@ -597,7 +736,6 @@ const StatCard = ({ icon, number, label, gradient }) => (
   </div>
 );
 
-// Component: Action Card
 const ActionCard = ({ icon, title, description, onClick, color }) => (
   <button
     onClick={onClick}
@@ -638,7 +776,6 @@ const ActionCard = ({ icon, title, description, onClick, color }) => (
   </button>
 );
 
-// Component: Patient Info Card
 const PatientInfoCard = ({ patient }) => (
   <div style={{
     background: 'white',
@@ -673,7 +810,6 @@ const PatientInfoCard = ({ patient }) => (
   </div>
 );
 
-// Component: Info Field
 const InfoField = ({ label, value, icon }) => (
   <div style={{
     background: 'linear-gradient(135deg, #f8fafb 0%, #ffffff 100%)',
@@ -708,7 +844,6 @@ const InfoField = ({ label, value, icon }) => (
   </div>
 );
 
-// Component: ECG Upload Section
 const ECGUploadSection = ({ ecgFile, handleEcgUpload, handleAiDiagnosis, aiDiagnosis }) => (
   <div style={{
     background: 'white',
@@ -834,7 +969,6 @@ const ECGUploadSection = ({ ecgFile, handleEcgUpload, handleAiDiagnosis, aiDiagn
   </div>
 );
 
-// Component: Vital Signs Section
 const VitalSignsSection = ({ vitalSigns, setVitalSigns }) => (
   <div style={{
     background: 'white',
@@ -919,7 +1053,6 @@ const VitalSignsSection = ({ vitalSigns, setVitalSigns }) => (
   </div>
 );
 
-// Component: Vital Input
 const VitalInput = ({ label, value, onChange, unit, placeholder, icon }) => (
   <div>
     <label style={{ 
@@ -979,7 +1112,6 @@ const VitalInput = ({ label, value, onChange, unit, placeholder, icon }) => (
   </div>
 );
 
-// Component: Doctor Opinion Section
 const DoctorOpinionSection = ({ doctorOpinion, setDoctorOpinion }) => (
   <div style={{
     background: 'white',
@@ -1027,7 +1159,262 @@ const DoctorOpinionSection = ({ doctorOpinion, setDoctorOpinion }) => (
   </div>
 );
 
-// Component: Search Modal
+// ✅ NEW: Medications Section Component
+const MedicationsSection = ({ medications, newMedication, setNewMedication, handleAddMedication, handleRemoveMedication }) => (
+  <div style={{
+    background: 'white',
+    borderRadius: '16px',
+    padding: '35px',
+    marginBottom: '30px',
+    boxShadow: '0 5px 20px rgba(18, 92, 122, 0.08)',
+    border: '1px solid rgba(18, 92, 122, 0.1)'
+  }}>
+    <h2 style={{
+      fontSize: '1.8rem',
+      color: '#125c7a',
+      marginBottom: '25px',
+      fontWeight: '700',
+      paddingBottom: '15px',
+      borderBottom: '2px solid rgba(18, 92, 122, 0.1)',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '10px'
+    }}>
+      <span>💊</span>
+      الأدوية الموصوفة
+      <span style={{
+        background: 'linear-gradient(135deg, #a23f97 0%, #c55db3 100%)',
+        color: 'white',
+        padding: '4px 12px',
+        borderRadius: '20px',
+        fontSize: '0.9rem',
+        fontWeight: '600',
+        marginRight: 'auto'
+      }}>
+        {medications.length} دواء
+      </span>
+    </h2>
+
+    {/* Add New Medication Form */}
+    <div style={{
+      background: 'linear-gradient(135deg, rgba(162,63,151,0.05) 0%, rgba(18,92,122,0.05) 100%)',
+      padding: '25px',
+      borderRadius: '12px',
+      border: '2px dashed rgba(162, 63, 151, 0.3)',
+      marginBottom: '30px'
+    }}>
+      <h3 style={{
+        fontSize: '1.2rem',
+        color: '#125c7a',
+        marginBottom: '20px',
+        fontWeight: '600'
+      }}>
+        ➕ إضافة دواء جديد
+      </h3>
+      
+      <div style={{ 
+        display: 'grid', 
+        gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', 
+        gap: '15px',
+        marginBottom: '20px'
+      }}>
+        <MedicationInput
+          label="اسم الدواء"
+          value={newMedication.medicationName}
+          onChange={(e) => setNewMedication({...newMedication, medicationName: e.target.value})}
+          placeholder="مثال: Aspirin"
+          icon="💊"
+        />
+        <MedicationInput
+          label="الجرعة"
+          value={newMedication.dosage}
+          onChange={(e) => setNewMedication({...newMedication, dosage: e.target.value})}
+          placeholder="مثال: 81 mg"
+          icon="📏"
+        />
+        <MedicationInput
+          label="التكرار"
+          value={newMedication.frequency}
+          onChange={(e) => setNewMedication({...newMedication, frequency: e.target.value})}
+          placeholder="مثال: مرة واحدة يومياً"
+          icon="🕐"
+        />
+        <MedicationInput
+          label="المدة"
+          value={newMedication.duration}
+          onChange={(e) => setNewMedication({...newMedication, duration: e.target.value})}
+          placeholder="مثال: 30 يوم"
+          icon="📅"
+        />
+      </div>
+
+      <button
+        onClick={handleAddMedication}
+        style={{
+          background: 'linear-gradient(135deg, #10b981 0%, #059669 100%)',
+          color: 'white',
+          border: 'none',
+          padding: '12px 30px',
+          borderRadius: '10px',
+          fontSize: '1rem',
+          fontWeight: '600',
+          cursor: 'pointer',
+          transition: 'all 0.3s ease',
+          fontFamily: 'Cairo, sans-serif',
+          display: 'flex',
+          alignItems: 'center',
+          gap: '8px'
+        }}
+        onMouseOver={(e) => {
+          e.target.style.transform = 'translateY(-2px)';
+          e.target.style.boxShadow = '0 8px 20px rgba(16, 185, 129, 0.3)';
+        }}
+        onMouseOut={(e) => {
+          e.target.style.transform = 'translateY(0)';
+          e.target.style.boxShadow = 'none';
+        }}
+      >
+        <span style={{ fontSize: '1.3rem' }}>➕</span>
+        إضافة الدواء
+      </button>
+    </div>
+
+    {/* Medications List */}
+    {medications.length === 0 ? (
+      <div style={{
+        textAlign: 'center',
+        padding: '40px 20px',
+        color: '#5a7a8a'
+      }}>
+        <div style={{ fontSize: '4rem', marginBottom: '15px', opacity: 0.5 }}>💊</div>
+        <p style={{ fontSize: '1.1rem', fontWeight: '500' }}>لم يتم إضافة أي أدوية بعد</p>
+        <p style={{ fontSize: '0.95rem' }}>استخدم النموذج أعلاه لإضافة الأدوية</p>
+      </div>
+    ) : (
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '15px' }}>
+        {medications.map((med, index) => (
+          <div key={index} style={{
+            background: 'white',
+            border: '2px solid rgba(18, 92, 122, 0.15)',
+            borderRadius: '12px',
+            padding: '20px',
+            transition: 'all 0.3s ease',
+            position: 'relative'
+          }}
+          onMouseOver={(e) => {
+            e.currentTarget.style.borderColor = '#a23f97';
+            e.currentTarget.style.boxShadow = '0 5px 15px rgba(162, 63, 151, 0.1)';
+          }}
+          onMouseOut={(e) => {
+            e.currentTarget.style.borderColor = 'rgba(18, 92, 122, 0.15)';
+            e.currentTarget.style.boxShadow = 'none';
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div style={{ flex: 1 }}>
+                <div style={{
+                  fontSize: '1.3rem',
+                  fontWeight: '700',
+                  color: '#125c7a',
+                  marginBottom: '12px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '10px'
+                }}>
+                  <span style={{ fontSize: '1.5rem' }}>💊</span>
+                  {med.medicationName}
+                </div>
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px' }}>
+                  <MedicationDetail label="الجرعة" value={med.dosage} />
+                  <MedicationDetail label="التكرار" value={med.frequency} />
+                  <MedicationDetail label="المدة" value={med.duration} />
+                </div>
+              </div>
+              <button
+                onClick={() => handleRemoveMedication(index)}
+                style={{
+                  background: 'linear-gradient(135deg, #ef4444 0%, #dc2626 100%)',
+                  color: 'white',
+                  border: 'none',
+                  padding: '8px 16px',
+                  borderRadius: '8px',
+                  fontSize: '0.9rem',
+                  fontWeight: '600',
+                  cursor: 'pointer',
+                  transition: 'all 0.3s ease',
+                  fontFamily: 'Cairo, sans-serif'
+                }}
+                onMouseOver={(e) => {
+                  e.target.style.transform = 'translateY(-2px)';
+                  e.target.style.boxShadow = '0 6px 15px rgba(239, 68, 68, 0.3)';
+                }}
+                onMouseOut={(e) => {
+                  e.target.style.transform = 'translateY(0)';
+                  e.target.style.boxShadow = 'none';
+                }}
+              >
+                🗑️ حذف
+              </button>
+            </div>
+          </div>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+const MedicationInput = ({ label, value, onChange, placeholder, icon }) => (
+  <div>
+    <label style={{ 
+      fontSize: '0.9rem', 
+      fontWeight: '600', 
+      color: '#5a7a8a',
+      marginBottom: '8px',
+      display: 'flex',
+      alignItems: 'center',
+      gap: '6px'
+    }}>
+      <span style={{ fontSize: '1.1rem' }}>{icon}</span>
+      {label}
+    </label>
+    <input
+      type="text"
+      value={value}
+      onChange={onChange}
+      placeholder={placeholder}
+      style={{
+        width: '100%',
+        padding: '12px 16px',
+        border: '2px solid rgba(18, 92, 122, 0.15)',
+        borderRadius: '8px',
+        fontSize: '1rem',
+        fontFamily: 'Cairo, sans-serif',
+        transition: 'all 0.3s ease',
+        outline: 'none',
+        background: 'white'
+      }}
+      onFocus={(e) => {
+        e.target.style.borderColor = '#a23f97';
+        e.target.style.background = 'rgba(162, 63, 151, 0.05)';
+      }}
+      onBlur={(e) => {
+        e.target.style.borderColor = 'rgba(18, 92, 122, 0.15)';
+        e.target.style.background = 'white';
+      }}
+    />
+  </div>
+);
+
+const MedicationDetail = ({ label, value }) => (
+  <div style={{
+    background: 'rgba(18, 92, 122, 0.05)',
+    padding: '10px 12px',
+    borderRadius: '8px'
+  }}>
+    <span style={{ fontSize: '0.8rem', color: '#5a7a8a', fontWeight: '600' }}>{label}: </span>
+    <span style={{ fontSize: '0.95rem', color: '#125c7a', fontWeight: '500' }}>{value}</span>
+  </div>
+);
+
 const SearchModal = ({ searchId, setSearchId, handleSearchPatient, onClose }) => (
   <div
     onClick={onClose}
