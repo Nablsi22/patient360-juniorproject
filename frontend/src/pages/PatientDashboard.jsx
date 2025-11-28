@@ -1,27 +1,21 @@
+// src/pages/PatientDashboard.jsx
+// ✅ REFACTORED VERSION - Uses service layer
+
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 import '../styles/PatientDashboard.css';
 
+// ✅ CHANGE #1: Import services instead of using localStorage directly
+import { getCurrentUser, logout as logoutService } from '../services/authService';
+import { getCurrentPatientData } from '../services/patientService';
+
 /**
- * PatientDashboard Component
+ * PatientDashboard Component - REFACTORED VERSION
  * 
- * Comprehensive patient dashboard featuring:
- * - Complete visits history with advanced filtering
- * - AI-powered health risk prediction
- * - Interactive medication calendar
- * - Health statistics overview
- * - Secure authentication and authorization
- * 
- * ✅ UPDATED: Now reads REAL data from doctor instead of mock data
- * 
- * Security Features:
- * - Role-based access control (patients only)
- * - Session validation
- * - Secure logout with localStorage cleanup
- * 
- * @component
- * @returns {JSX.Element} Patient dashboard with full medical management features
+ * ✅ NOW USES SERVICE LAYER for all data operations
+ * ✅ Reads REAL data from doctor (no mock data)
+ * ✅ Easy backend integration later
  */
 const PatientDashboard = () => {
   const navigate = useNavigate();
@@ -85,43 +79,62 @@ const PatientDashboard = () => {
   };
 
   /**
+   * ✅ CHANGE #2: Load patient data using services
    * Authentication and data loading on component mount
-   * Implements secure session validation
    */
   useEffect(() => {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    const loadPatientData = async () => {
+      setLoading(true);
+      
+      // ✅ Use service to get current user
+      const currentUser = await getCurrentUser();
+      
+      // Security Check 1: User must be logged in
+      if (!currentUser) {
+        openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/'));
+        return;
+      }
+      
+      // Security Check 2: User must have patient role
+      if (currentUser.role !== 'patient') {
+        openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمرضى فقط', () => navigate('/'));
+        return;
+      }
+      
+      // ✅ Use service to get latest patient data (including doctor updates)
+      const result = await getCurrentPatientData();
+      
+      if (result.success) {
+        const patientData = result.patient;
+        setUser(patientData);
+        
+        // Generate visits from patient data
+        const realVisits = generateVisitsFromPatientData(patientData);
+        setVisits(realVisits);
+        setFilteredVisits(realVisits);
+      } else {
+        // Fallback to current user if service fails
+        setUser(currentUser);
+        const realVisits = generateVisitsFromPatientData(currentUser);
+        setVisits(realVisits);
+        setFilteredVisits(realVisits);
+      }
+      
+      // Load doctors list
+      const mockDoctors = generateMockDoctors();
+      setDoctors(mockDoctors);
+      
+      setLoading(false);
+    };
     
-    // Security Check 1: User must be logged in
-    if (!currentUser) {
-      openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/'));
-      return;
-    }
-    
-    // Security Check 2: User must have patient role
-    if (currentUser.role !== 'patient') {
-      openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمرضى فقط', () => navigate('/'));
-      return;
-    }
-    
-    setUser(currentUser);
-    
-    // ✅ CHANGED: Load REAL visits from patient data
-    const realVisits = generateVisitsFromPatientData(currentUser);
-    setVisits(realVisits);
-    setFilteredVisits(realVisits);
-    
-    // Load doctors list
-    const mockDoctors = generateMockDoctors();
-    setDoctors(mockDoctors);
-    
-    setLoading(false);
+    loadPatientData();
   }, [navigate]);
 
   /**
-   * ✅ NEW FUNCTION: Generates visits from REAL patient data entered by doctor
+   * Generates visits from REAL patient data entered by doctor
    * Reads ECG, medications, AI results, and vital signs from patient object
    * 
-   * @param {Object} patient - Full patient object from localStorage
+   * @param {Object} patient - Full patient object from service
    * @returns {Array} Array of visit objects with real doctor data
    */
   const generateVisitsFromPatientData = (patient) => {
@@ -143,7 +156,7 @@ const PatientDashboard = () => {
         }),
         chiefComplaint: 'زيارة طبية - متابعة',
         
-        // ✅ Real vital signs from doctor
+        // Real vital signs from doctor
         vitalSigns: patient.vitalSigns ? {
           bloodPressure: `${patient.vitalSigns.bloodPressureSystolic || '-'}/${patient.vitalSigns.bloodPressureDiastolic || '-'}`,
           heartRate: parseInt(patient.vitalSigns.heartRate) || 0,
@@ -153,13 +166,13 @@ const PatientDashboard = () => {
         
         diagnosis: patient.doctorOpinion || 'لم يتم التشخيص بعد',
         
-        // ✅ Real ECG results from doctor
+        // Real ECG results from doctor
         ecgResults: patient.ecgResults || null,
         
-        // ✅ Real AI prediction from doctor
+        // Real AI prediction from doctor
         aiPrediction: patient.aiPrediction || null,
         
-        // ✅ Real medications from doctor
+        // Real medications from doctor
         prescribedMedications: patient.prescribedMedications || [],
         
         labTests: patient.labTests || [],
@@ -280,17 +293,17 @@ const PatientDashboard = () => {
   };
 
   /**
+   * ✅ CHANGE #3: Use service for logout
    * Handles secure logout
-   * Clears all session data
    */
   const handleLogout = () => {
     openModal(
       'confirm',
       'تأكيد تسجيل الخروج',
       'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
-      () => {
-        // User confirmed logout
-        localStorage.removeItem('currentUser');
+      async () => {
+        // ✅ Use logout service
+        await logoutService();
         
         // Close confirm modal first
         setModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
@@ -485,7 +498,7 @@ const PatientDashboard = () => {
                     </div>
                     <h3>رقم الهاتف</h3>
                   </div>
-                  <p className="card-value" dir="ltr">{user.phoneNumber || 'غير محدد'}</p>
+                  <p className="card-value" dir="ltr">{user.phoneNumber || user.phone || 'غير محدد'}</p>
                   <span className="card-subtitle">للاتصال المباشر</span>
                 </div>
 

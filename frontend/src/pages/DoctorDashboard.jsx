@@ -1,7 +1,17 @@
 // src/pages/DoctorDashboard.jsx
+// ✅ REFACTORED VERSION - Uses service layer
+
 import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
+
+// ✅ CHANGE #1: Import services instead of using localStorage directly
+import { getCurrentUser, logout as logoutService } from '../services/authService';
+import { 
+  getPatientById, 
+  updatePatientMedicalData,
+  getAllPatients 
+} from '../services/patientService';
 
 const DoctorDashboard = () => {
   const navigate = useNavigate();
@@ -13,6 +23,8 @@ const DoctorDashboard = () => {
   const [showSearchModal, setShowSearchModal] = useState(false);
   const [ecgFile, setEcgFile] = useState(null);
   const [aiDiagnosis, setAiDiagnosis] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [saving, setSaving] = useState(false);
   
   const [vitalSigns, setVitalSigns] = useState({
     bloodPressureSystolic: '',
@@ -26,7 +38,7 @@ const DoctorDashboard = () => {
   
   const [doctorOpinion, setDoctorOpinion] = useState('');
   
-  // ✅ NEW: Medications state
+  // Medications state
   const [medications, setMedications] = useState([]);
   const [newMedication, setNewMedication] = useState({
     medicationName: '',
@@ -35,40 +47,61 @@ const DoctorDashboard = () => {
     duration: ''
   });
 
+  // ✅ CHANGE #2: Use service to get current user
   useEffect(() => {
-    const currentUser = JSON.parse(localStorage.getItem('currentUser'));
+    const loadUser = async () => {
+      const currentUser = await getCurrentUser();
+      
+      if (!currentUser) {
+        alert('يجب تسجيل الدخول أولاً');
+        navigate('/');
+        return;
+      }
+      
+      if (currentUser.role !== 'doctor') {
+        alert('غير مصرح لك بالوصول إلى هذه الصفحة');
+        navigate('/');
+        return;
+      }
+      
+      setUser(currentUser);
+      
+      // Load all patients using service
+      const result = await getAllPatients();
+      if (result.success) {
+        setPatients(result.patients);
+      }
+    };
     
-    if (!currentUser) {
-      navigate('/');
-      return;
-    }
-    
-    if (currentUser.role !== 'doctor') {
-      alert('غير مصرح لك بالوصول إلى هذه الصفحة');
-      navigate('/');
-      return;
-    }
-    
-    setUser(currentUser);
-    const storedPatients = JSON.parse(localStorage.getItem('patients') || '[]');
-    setPatients(storedPatients);
+    loadUser();
   }, [navigate]);
 
-  const handleLogout = () => {
-    localStorage.removeItem('currentUser');
-    alert('تم تسجيل الخروج بنجاح');
-    navigate('/');
+  // ✅ CHANGE #3: Use service for logout
+  const handleLogout = async () => {
+    const confirmed = window.confirm('هل أنت متأكد من رغبتك في تسجيل الخروج؟');
+    if (confirmed) {
+      await logoutService();
+      alert('تم تسجيل الخروج بنجاح');
+      navigate('/');
+    }
   };
 
-  const handleSearchPatient = () => {
+  // ✅ CHANGE #4: Use service to search patient
+  const handleSearchPatient = async () => {
     if (!searchId.trim()) {
       alert('الرجاء إدخال الرقم الوطني للمريض');
       return;
     }
     
-    const patient = patients.find(p => p.nationalId === searchId);
+    setLoading(true);
     
-    if (patient) {
+    // Use service function instead of localStorage
+    const result = await getPatientById(searchId, true); // true = search by nationalId
+    
+    setLoading(false);
+    
+    if (result.success) {
+      const patient = result.patient;
       setSelectedPatient(patient);
       setVitalSigns(patient.vitalSigns || {
         bloodPressureSystolic: '',
@@ -80,16 +113,22 @@ const DoctorDashboard = () => {
         weight: ''
       });
       setDoctorOpinion(patient.doctorOpinion || '');
-      setMedications(patient.prescribedMedications || []); // ✅ Load existing medications
+      setMedications(patient.prescribedMedications || []);
       setView('patientDetail');
       setShowSearchModal(false);
       setSearchId('');
+      
+      // Refresh patients list
+      const patientsResult = await getAllPatients();
+      if (patientsResult.success) {
+        setPatients(patientsResult.patients);
+      }
     } else {
-      alert('لم يتم العثور على مريض بهذا الرقم الوطني');
+      alert(result.message);
     }
   };
 
-  // ✅ NEW: Add medication to list
+  // Add medication to list
   const handleAddMedication = () => {
     if (!newMedication.medicationName || !newMedication.dosage || !newMedication.frequency || !newMedication.duration) {
       alert('الرجاء ملء جميع حقول الدواء');
@@ -105,14 +144,26 @@ const DoctorDashboard = () => {
     });
   };
 
-  // ✅ NEW: Remove medication from list
+  // Remove medication from list
   const handleRemoveMedication = (index) => {
     const updatedMeds = medications.filter((_, i) => i !== index);
     setMedications(updatedMeds);
   };
 
-  const handleSavePatientData = () => {
-    if (!selectedPatient) return;
+  // ✅ CHANGE #5: Use service to save patient data
+  const handleSavePatientData = async () => {
+    if (!selectedPatient) {
+      alert('يجب اختيار مريض أولاً');
+      return;
+    }
+    
+    // Validate vital signs
+    if (!vitalSigns.bloodPressureSystolic || !vitalSigns.heartRate) {
+      alert('يرجى إدخال العلامات الحيوية الأساسية (ضغط الدم ومعدل النبض)');
+      return;
+    }
+    
+    setSaving(true);
     
     // Prepare ECG results if file was uploaded
     const ecgResults = ecgFile ? {
@@ -143,26 +194,36 @@ const DoctorDashboard = () => {
       analysisDate: new Date().toISOString()
     } : null;
     
-    const updatedPatient = {
-      ...selectedPatient,
+    // Prepare medical data
+    const medicalData = {
       vitalSigns,
       doctorOpinion,
       ecgResults,
       aiPrediction,
-      prescribedMedications: medications, // ✅ NEW: Save medications
-      lastUpdated: new Date().toISOString(),
+      prescribedMedications: medications,
       lastUpdatedBy: `د. ${user.firstName} ${user.lastName}`
     };
     
-    const updatedPatients = patients.map(p => 
-      p.nationalId === selectedPatient.nationalId ? updatedPatient : p
+    // ✅ Use service function instead of localStorage
+    const result = await updatePatientMedicalData(
+      selectedPatient.nationalId,
+      medicalData
     );
     
-    setPatients(updatedPatients);
-    setSelectedPatient(updatedPatient);
-    localStorage.setItem('patients', JSON.stringify(updatedPatients));
+    setSaving(false);
     
-    alert('تم حفظ البيانات بنجاح ✅');
+    if (result.success) {
+      alert('تم حفظ البيانات بنجاح ✅');
+      setSelectedPatient(result.patient);
+      
+      // Refresh patients list
+      const patientsResult = await getAllPatients();
+      if (patientsResult.success) {
+        setPatients(patientsResult.patients);
+      }
+    } else {
+      alert('خطأ: ' + result.message);
+    }
   };
 
   // Helper functions for risk calculation
@@ -644,7 +705,7 @@ const DoctorDashboard = () => {
 
               <VitalSignsSection vitalSigns={vitalSigns} setVitalSigns={setVitalSigns} />
 
-              {/* ✅ NEW: Medications Section */}
+              {/* Medications Section */}
               <MedicationsSection 
                 medications={medications}
                 newMedication={newMedication}
@@ -656,29 +717,36 @@ const DoctorDashboard = () => {
               <div style={{ display: 'flex', justifyContent: 'center', marginTop: '40px' }}>
                 <button
                   onClick={handleSavePatientData}
+                  disabled={saving}
                   style={{
-                    background: 'linear-gradient(135deg, #a23f97 0%, #8a3582 100%)',
+                    background: saving ? 
+                      'linear-gradient(135deg, #9ca3af 0%, #6b7280 100%)' :
+                      'linear-gradient(135deg, #a23f97 0%, #8a3582 100%)',
                     color: 'white',
                     border: 'none',
                     padding: '16px 50px',
                     borderRadius: '12px',
                     fontSize: '1.2rem',
                     fontWeight: '700',
-                    cursor: 'pointer',
+                    cursor: saving ? 'not-allowed' : 'pointer',
                     transition: 'all 0.3s ease',
                     fontFamily: 'Cairo, sans-serif',
                     boxShadow: '0 10px 30px rgba(162, 63, 151, 0.3)'
                   }}
                   onMouseOver={(e) => {
-                    e.target.style.transform = 'translateY(-3px)';
-                    e.target.style.boxShadow = '0 15px 40px rgba(162, 63, 151, 0.4)';
+                    if (!saving) {
+                      e.target.style.transform = 'translateY(-3px)';
+                      e.target.style.boxShadow = '0 15px 40px rgba(162, 63, 151, 0.4)';
+                    }
                   }}
                   onMouseOut={(e) => {
-                    e.target.style.transform = 'translateY(0)';
-                    e.target.style.boxShadow = '0 10px 30px rgba(162, 63, 151, 0.3)';
+                    if (!saving) {
+                      e.target.style.transform = 'translateY(0)';
+                      e.target.style.boxShadow = '0 10px 30px rgba(162, 63, 151, 0.3)';
+                    }
                   }}
                 >
-                  💾 حفظ جميع البيانات
+                  {saving ? '⏳ جاري الحفظ...' : '💾 حفظ جميع البيانات'}
                 </button>
               </div>
             </div>
@@ -692,13 +760,14 @@ const DoctorDashboard = () => {
           setSearchId={setSearchId}
           handleSearchPatient={handleSearchPatient}
           onClose={() => setShowSearchModal(false)}
+          loading={loading}
         />
       )}
     </div>
   );
 };
 
-// Components
+// Components (same as before)
 const TableHeader = ({ children, align = 'right' }) => (
   <th style={{ 
     padding: '15px 20px', 
@@ -1159,7 +1228,6 @@ const DoctorOpinionSection = ({ doctorOpinion, setDoctorOpinion }) => (
   </div>
 );
 
-// ✅ NEW: Medications Section Component
 const MedicationsSection = ({ medications, newMedication, setNewMedication, handleAddMedication, handleRemoveMedication }) => (
   <div style={{
     background: 'white',
@@ -1415,7 +1483,7 @@ const MedicationDetail = ({ label, value }) => (
   </div>
 );
 
-const SearchModal = ({ searchId, setSearchId, handleSearchPatient, onClose }) => (
+const SearchModal = ({ searchId, setSearchId, handleSearchPatient, onClose, loading }) => (
   <div
     onClick={onClose}
     style={{
@@ -1495,6 +1563,7 @@ const SearchModal = ({ searchId, setSearchId, handleSearchPatient, onClose }) =>
         value={searchId}
         onChange={(e) => setSearchId(e.target.value)}
         placeholder="الرقم الوطني"
+        disabled={loading}
         style={{
           width: '100%',
           padding: '14px 18px',
@@ -1515,34 +1584,41 @@ const SearchModal = ({ searchId, setSearchId, handleSearchPatient, onClose }) =>
           e.target.style.borderColor = 'rgba(18, 92, 122, 0.15)';
           e.target.style.background = 'rgba(18, 92, 122, 0.05)';
         }}
-        onKeyPress={(e) => e.key === 'Enter' && handleSearchPatient()}
+        onKeyPress={(e) => e.key === 'Enter' && !loading && handleSearchPatient()}
       />
       
       <button
         onClick={handleSearchPatient}
+        disabled={loading}
         style={{
           width: '100%',
-          background: 'linear-gradient(135deg, #125c7a 0%, #a23f97 100%)',
+          background: loading ?
+            'linear-gradient(135deg, #9ca3af 0%, #6b7280 100%)' :
+            'linear-gradient(135deg, #125c7a 0%, #a23f97 100%)',
           color: 'white',
           border: 'none',
           padding: '14px',
           borderRadius: '10px',
           fontSize: '1.1rem',
           fontWeight: '700',
-          cursor: 'pointer',
+          cursor: loading ? 'not-allowed' : 'pointer',
           transition: 'all 0.3s ease',
           fontFamily: 'Cairo, sans-serif'
         }}
         onMouseOver={(e) => {
-          e.target.style.transform = 'translateY(-2px)';
-          e.target.style.boxShadow = '0 10px 30px rgba(162, 63, 151, 0.3)';
+          if (!loading) {
+            e.target.style.transform = 'translateY(-2px)';
+            e.target.style.boxShadow = '0 10px 30px rgba(162, 63, 151, 0.3)';
+          }
         }}
         onMouseOut={(e) => {
-          e.target.style.transform = 'translateY(0)';
-          e.target.style.boxShadow = 'none';
+          if (!loading) {
+            e.target.style.transform = 'translateY(0)';
+            e.target.style.boxShadow = 'none';
+          }
         }}
       >
-        بحث
+        {loading ? 'جاري البحث...' : 'بحث'}
       </button>
     </div>
   </div>
