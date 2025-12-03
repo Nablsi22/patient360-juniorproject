@@ -1,92 +1,82 @@
 import React, { useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
+import { authAPI } from '../services/api';
+import { calculateAge, getTodayDate, validateSyrianPhone, validateNationalId } from '../utils/ageCalculator';
+import LoadingSpinner from '../components/LoadingSpinner';
 import '../styles/SignUp.css';
 
 /**
- * SignUp Component - Patient Registration System
+ * SignUp Component - Patient Registration System with Under-18 Support
  * 
- * This component handles the complete patient registration process for the Patient 360° platform.
- * Only patients can register through this page. Admin and doctor accounts are created separately
- * by system administrators for security purposes.
+ * UPDATED: Now supports both adult (with national ID) and minor (with parent ID) registration
  * 
- * Database Integration (Production):
- * - Frontend validation (current) + Backend validation (required)
- * - Creates Person document in Persons collection via POST /api/persons
- * - Creates Account document in Accounts collection via POST /api/accounts
- * - Creates Patient document in Patients collection via POST /api/patients
- * - Password must be bcrypt hashed on backend (NEVER on frontend)
- * 
- * Current State: Uses localStorage for development simulation
- * Production: Will use REST API calls to backend server connected to MongoDB
+ * Features:
+ * - Age detection from date of birth
+ * - Conditional ID fields (National ID for adults, Parent ID for minors)
+ * - Auto-generated child IDs for minors
+ * - Full MongoDB integration via REST API
+ * - Comprehensive validation
  * 
  * @component
- * @returns {JSX.Element} Multi-step patient registration form
- * 
- * @see {@link https://www.mongodb.com/docs/manual/core/data-modeling-introduction/ MongoDB Data Modeling}
- * @see {@link https://cheatsheetseries.owasp.org/cheatsheets/Authentication_Cheat_Sheet.html OWASP Authentication}
  */
 const SignUp = () => {
   const navigate = useNavigate();
   const [currentStep, setCurrentStep] = useState(1);
   const [loading, setLoading] = useState(false);
   
+  // Age state
+  const [age, setAge] = useState(0);
+  const [isMinor, setIsMinor] = useState(false);
+  
   // Modal state for success/error messages
   const [modal, setModal] = useState({
     isOpen: false,
-    type: '', // 'success' or 'error'
+    type: '',
     title: '',
     message: '',
     onClose: null
   });
   
   /**
-   * Form state containing all fields from Persons, Accounts, and Patients collections
-   * Organized according to MongoDB schema requirements
+   * Form state - Updated to support both adults and minors
    */
   const [formData, setFormData] = useState({
     // ========== Persons Collection Fields ==========
-    nationalId: '',           // Required: 11 digits
-    firstName: '',            // Required: 2-50 chars, Arabic or English
-    lastName: '',             // Required: 2-50 chars, Arabic or English
-    dateOfBirth: '',          // Required: date (must be in the past)
-    gender: '',               // Required: 'male' or 'female'
-    phoneNumber: '',          // Required: Syrian format +963 or 09
-    address: '',              // Optional: 5-200 chars
+    nationalId: '',           // For adults only
+    parentNationalId: '',     // For minors only (NEW)
+    firstName: '',
+    lastName: '',
+    dateOfBirth: '',
+    gender: '',
+    phoneNumber: '',
+    address: '',
     
     // ========== Accounts Collection Fields ==========
-    email: '',                // Required: valid email format
-    password: '',             // Required: will be bcrypt hashed (60 chars)
-    confirmPassword: '',      // For validation only
+    email: '',
+    password: '',
+    confirmPassword: '',
     
     // ========== Patients Collection Fields ==========
-    // Basic Medical Info
-    bloodType: '',            // Optional: A+, A-, B+, B-, AB+, AB-, O+, O-
-    height: '',               // Optional: 50-250 cm
-    weight: '',               // Optional: 2-300 kg
-    smokingStatus: '',        // Optional: non-smoker, former smoker, current smoker
+    bloodType: '',
+    height: '',
+    weight: '',
+    smokingStatus: '',
     
-    // Health History (Arrays)
-    allergies: '',            // Optional: Will be converted to array
-    chronicDiseases: '',      // Optional: Will be converted to array
-    familyHistory: '',        // Optional: Will be converted to array
+    // Health History
+    allergies: '',
+    chronicDiseases: '',
+    familyHistory: '',
     
-    // Emergency Contact (Object)
-    emergencyContactName: '',         // Required in emergencyContact object
-    emergencyContactRelationship: '', // Required in emergencyContact object
-    emergencyContactPhone: ''         // Required in emergencyContact object
+    // Emergency Contact
+    emergencyContactName: '',
+    emergencyContactRelationship: '',
+    emergencyContactPhone: ''
   });
 
   const [errors, setErrors] = useState({});
 
-  /**
-   * Blood type options as per Patients collection schema
-   */
   const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
-
-  /**
-   * Smoking status options as per Patients collection schema
-   */
   const smokingStatuses = [
     { value: 'non-smoker', label: 'غير مدخن' },
     { value: 'former smoker', label: 'مدخن سابق' },
@@ -94,12 +84,7 @@ const SignUp = () => {
   ];
 
   /**
-   * Opens the modal with specified configuration
-   * 
-   * @param {string} type - 'success' or 'error'
-   * @param {string} title - Modal title
-   * @param {string} message - Modal message
-   * @param {function} onClose - Optional callback when modal closes
+   * Opens modal with configuration
    */
   const openModal = (type, title, message, onClose = null) => {
     setModal({
@@ -112,7 +97,7 @@ const SignUp = () => {
   };
 
   /**
-   * Closes the modal and executes callback if provided
+   * Closes modal and executes callback
    */
   const closeModal = () => {
     if (modal.onClose) {
@@ -128,60 +113,18 @@ const SignUp = () => {
   };
 
   /**
-   * Validates Syrian phone number format
-   * Accepts: +963XXXXXXXXX or 09XXXXXXXX
-   * 
-   * @param {string} phone - Phone number to validate
-   * @returns {boolean} True if valid Syrian phone number
-   * 
-   * @see {@link https://en.wikipedia.org/wiki/Telephone_numbers_in_Syria Syrian Phone Format}
-   */
-  const isValidSyrianPhone = (phone) => {
-    const cleanPhone = phone.replace(/\s/g, '');
-    // Syrian format: +963 followed by 9 digits OR 09 followed by 8 digits
-    const syrianPattern = /^(\+963[0-9]{9}|09[0-9]{8})$/;
-    return syrianPattern.test(cleanPhone);
-  };
-
-  /**
-   * Validates that the date is not in the future
-   * Used for date of birth validation
-   * 
-   * @param {string} dateString - Date string in YYYY-MM-DD format
-   * @returns {boolean} True if date is in the past
+   * Validates date is in the past
    */
   const isDateInPast = (dateString) => {
     if (!dateString) return false;
     const selectedDate = new Date(dateString);
     const today = new Date();
-    today.setHours(0, 0, 0, 0); // Reset time to compare only dates
+    today.setHours(0, 0, 0, 0);
     return selectedDate < today;
   };
 
   /**
-   * Calculates age from date of birth
-   * 
-   * @param {string} dateString - Date string in YYYY-MM-DD format
-   * @returns {number} Age in years
-   */
-  const calculateAge = (dateString) => {
-    if (!dateString) return 0;
-    const today = new Date();
-    const birthDate = new Date(dateString);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    return age;
-  };
-
-  /**
-   * Validates Arabic or English names according to Persons collection schema
-   * Pattern: ^[a-zA-Z\u0600-\u06FF\\s]+$
-   * 
-   * @param {string} name - Name to validate
-   * @returns {boolean} True if valid name format
+   * Validates Arabic or English names
    */
   const isValidName = (name) => {
     const namePattern = /^[a-zA-Z\u0600-\u06FF\s]+$/;
@@ -189,22 +132,45 @@ const SignUp = () => {
   };
 
   /**
-   * Comprehensive validation function for each step
-   * Implements all validation rules from MongoDB schema
-   * 
-   * NOTE: This is CLIENT-SIDE validation only. In production, you MUST
-   * validate again on the backend before saving to database.
-   * 
-   * @returns {boolean} True if current step passes all validations
+   * Handle date of birth change - NOW WITH AGE DETECTION
+   */
+  const handleDateOfBirthChange = (e) => {
+    const dob = e.target.value;
+    setFormData({ ...formData, dateOfBirth: dob });
+    
+    // Calculate age and determine if minor
+    const calculatedAge = calculateAge(dob);
+    setAge(calculatedAge);
+    const minor = calculatedAge < 18;
+    setIsMinor(minor);
+    
+    // Clear the appropriate ID field based on age
+    if (minor) {
+      setFormData(prev => ({ ...prev, nationalId: '' }));
+      // Clear national ID error if exists
+      if (errors.nationalId) {
+        setErrors(prev => ({ ...prev, nationalId: '' }));
+      }
+    } else {
+      setFormData(prev => ({ ...prev, parentNationalId: '' }));
+      // Clear parent ID error if exists
+      if (errors.parentNationalId) {
+        setErrors(prev => ({ ...prev, parentNationalId: '' }));
+      }
+    }
+  };
+
+  /**
+   * Comprehensive validation for each step
    */
   const validateStep = () => {
     const newErrors = {};
 
     // ========================================
-    // STEP 1: Personal Information (Persons Collection)
+    // STEP 1: Personal Information
     // ========================================
     if (currentStep === 1) {
-      // First Name Validation (required, 2-50 chars, Arabic/English only)
+      // First Name
       if (!formData.firstName.trim()) {
         newErrors.firstName = 'الاسم الأول مطلوب';
       } else if (formData.firstName.trim().length < 2) {
@@ -215,7 +181,7 @@ const SignUp = () => {
         newErrors.firstName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
       }
       
-      // Last Name Validation (required, 2-50 chars, Arabic/English only)
+      // Last Name
       if (!formData.lastName.trim()) {
         newErrors.lastName = 'اسم العائلة مطلوب';
       } else if (formData.lastName.trim().length < 2) {
@@ -226,47 +192,57 @@ const SignUp = () => {
         newErrors.lastName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
       }
       
-      // Email Validation (required, valid email format)
+      // Email
       if (!formData.email.trim()) {
         newErrors.email = 'البريد الإلكتروني مطلوب';
       } else if (!/^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(formData.email)) {
         newErrors.email = 'البريد الإلكتروني غير صحيح';
       }
       
-      // Phone Number Validation (required, Syrian format)
+      // Phone Number
       if (!formData.phoneNumber.trim()) {
         newErrors.phoneNumber = 'رقم الهاتف مطلوب';
-      } else if (!isValidSyrianPhone(formData.phoneNumber)) {
+      } else if (!validateSyrianPhone(formData.phoneNumber)) {
         newErrors.phoneNumber = 'رقم الهاتف غير صحيح (يجب أن يبدأ بـ +963 أو 09)';
       }
       
-      // National ID Validation (required, exactly 11 digits)
-      if (!formData.nationalId.trim()) {
-        newErrors.nationalId = 'رقم الهوية الوطنية مطلوب';
-      } else if (!/^[0-9]{11}$/.test(formData.nationalId)) {
-        newErrors.nationalId = 'رقم الهوية يجب أن يكون 11 رقم بالضبط';
+      // ID Validation - CONDITIONAL BASED ON AGE
+      if (isMinor) {
+        // Minor: Validate parent's national ID
+        if (!formData.parentNationalId.trim()) {
+          newErrors.parentNationalId = 'رقم الهوية الوطنية للوالد/الوالدة مطلوب';
+        } else if (!validateNationalId(formData.parentNationalId)) {
+          newErrors.parentNationalId = 'رقم الهوية يجب أن يكون 11 رقم بالضبط';
+        }
+      } else {
+        // Adult: Validate national ID
+        if (!formData.nationalId.trim()) {
+          newErrors.nationalId = 'رقم الهوية الوطنية مطلوب';
+        } else if (!validateNationalId(formData.nationalId)) {
+          newErrors.nationalId = 'رقم الهوية يجب أن يكون 11 رقم بالضبط';
+        }
       }
       
-      // Date of Birth Validation (required, must be in the past)
+      // Date of Birth
       if (!formData.dateOfBirth) {
         newErrors.dateOfBirth = 'تاريخ الميلاد مطلوب';
       } else if (!isDateInPast(formData.dateOfBirth)) {
         newErrors.dateOfBirth = 'تاريخ الميلاد يجب أن يكون في الماضي';
       } else {
-        const age = calculateAge(formData.dateOfBirth);
-        if (age < 1) {
-          newErrors.dateOfBirth = 'العمر يجب أن يكون سنة واحدة على الأقل';
-        } else if (age > 120) {
+        const calculatedAge = calculateAge(formData.dateOfBirth);
+        if (calculatedAge < 0) {
+          newErrors.dateOfBirth = 'العمر يجب أن يكون صحيح';
+        } else if (calculatedAge > 120) {
           newErrors.dateOfBirth = 'تاريخ الميلاد غير صحيح';
         }
       }
       
-      // Gender Validation (required)
+      // Gender
       if (!formData.gender) {
         newErrors.gender = 'يرجى اختيار الجنس';
       }
       
-      // Address Validation (optional, but if provided must be 5-200 chars)
+      // Address (optional validation)
       if (formData.address.trim() && formData.address.trim().length < 5) {
         newErrors.address = 'العنوان يجب أن يكون 5 أحرف على الأقل';
       } else if (formData.address.trim().length > 200) {
@@ -275,25 +251,23 @@ const SignUp = () => {
     }
 
     // ========================================
-    // STEP 2: Medical Information (Patients Collection)
+    // STEP 2: Medical Information
     // ========================================
     if (currentStep === 2) {
-      // Height Validation (optional, but if provided must be 50-250 cm)
       if (formData.height && (formData.height < 50 || formData.height > 250)) {
         newErrors.height = 'الطول يجب أن يكون بين 50 و 250 سم';
       }
       
-      // Weight Validation (optional, but if provided must be 2-300 kg)
       if (formData.weight && (formData.weight < 2 || formData.weight > 300)) {
         newErrors.weight = 'الوزن يجب أن يكون بين 2 و 300 كجم';
       }
     }
 
     // ========================================
-    // STEP 3: Health History & Emergency Contact (Patients Collection)
+    // STEP 3: Health History & Emergency Contact
     // ========================================
     if (currentStep === 3) {
-      // Emergency Contact Name Validation (required, 2-100 chars, Arabic/English)
+      // Emergency Contact Name
       if (!formData.emergencyContactName.trim()) {
         newErrors.emergencyContactName = 'اسم جهة الاتصال للطوارئ مطلوب';
       } else if (formData.emergencyContactName.trim().length < 2) {
@@ -304,7 +278,7 @@ const SignUp = () => {
         newErrors.emergencyContactName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
       }
       
-      // Emergency Contact Relationship Validation (required, 2-50 chars)
+      // Emergency Contact Relationship
       if (!formData.emergencyContactRelationship.trim()) {
         newErrors.emergencyContactRelationship = 'صلة القرابة مطلوبة';
       } else if (formData.emergencyContactRelationship.trim().length < 2) {
@@ -313,14 +287,14 @@ const SignUp = () => {
         newErrors.emergencyContactRelationship = 'صلة القرابة يجب ألا تتجاوز 50 حرفاً';
       }
       
-      // Emergency Contact Phone Validation (required, Syrian format)
+      // Emergency Contact Phone
       if (!formData.emergencyContactPhone.trim()) {
         newErrors.emergencyContactPhone = 'رقم هاتف الطوارئ مطلوب';
-      } else if (!isValidSyrianPhone(formData.emergencyContactPhone)) {
+      } else if (!validateSyrianPhone(formData.emergencyContactPhone)) {
         newErrors.emergencyContactPhone = 'رقم الهاتف غير صحيح (يجب أن يبدأ بـ +963 أو 09)';
       }
       
-      // Allergies Validation (optional, each item 2-100 chars if provided)
+      // Allergies (optional validation)
       if (formData.allergies.trim()) {
         const allergiesArray = formData.allergies.split(',').map(item => item.trim());
         for (let allergy of allergiesArray) {
@@ -331,7 +305,7 @@ const SignUp = () => {
         }
       }
       
-      // Chronic Diseases Validation (optional, each item 2-100 chars if provided)
+      // Chronic Diseases (optional validation)
       if (formData.chronicDiseases.trim()) {
         const diseasesArray = formData.chronicDiseases.split(',').map(item => item.trim());
         for (let disease of diseasesArray) {
@@ -342,7 +316,7 @@ const SignUp = () => {
         }
       }
       
-      // Family History Validation (optional, each item 5-200 chars if provided)
+      // Family History (optional validation)
       if (formData.familyHistory.trim()) {
         const historyArray = formData.familyHistory.split(',').map(item => item.trim());
         for (let history of historyArray) {
@@ -355,10 +329,9 @@ const SignUp = () => {
     }
 
     // ========================================
-    // STEP 4: Password & Account Security (Accounts Collection)
+    // STEP 4: Password
     // ========================================
     if (currentStep === 4) {
-      // Password Validation (required, min 8 chars, must have uppercase, number, special char)
       if (!formData.password) {
         newErrors.password = 'كلمة المرور مطلوبة';
       } else if (formData.password.length < 8) {
@@ -371,7 +344,6 @@ const SignUp = () => {
         newErrors.password = 'كلمة المرور يجب أن تحتوي على رمز خاص واحد على الأقل (!@#$%^&*)';
       }
       
-      // Confirm Password Validation (required, must match password)
       if (!formData.confirmPassword) {
         newErrors.confirmPassword = 'تأكيد كلمة المرور مطلوب';
       } else if (formData.password !== formData.confirmPassword) {
@@ -384,7 +356,7 @@ const SignUp = () => {
   };
 
   /**
-   * Advances to the next registration step
+   * Handle next step
    */
   const handleNext = () => {
     if (validateStep()) {
@@ -393,7 +365,7 @@ const SignUp = () => {
   };
 
   /**
-   * Returns to the previous registration step
+   * Handle previous step
    */
   const handlePrev = () => {
     setCurrentStep(prev => prev - 1);
@@ -401,28 +373,7 @@ const SignUp = () => {
   };
 
   /**
-   * Handles form submission and creates patient account
-   * 
-   * Process Flow (Development - localStorage):
-   * 1. Validates all form data
-   * 2. Checks for existing email/nationalId
-   * 3. Creates Person document structure
-   * 4. Creates Account document structure
-   * 5. Creates Patient document structure
-   * 6. Saves to localStorage
-   * 
-   * Process Flow (Production - Backend API):
-   * 1. Validates all form data (frontend)
-   * 2. POST to /api/auth/register with form data
-   * 3. Backend validates data again
-   * 4. Backend hashes password with bcrypt
-   * 5. Backend creates documents in MongoDB collections
-   * 6. Backend returns JWT token
-   * 7. Frontend stores token and redirects to dashboard
-   * 
-   * @param {Event} e - Form submit event
-   * 
-   * @see {@link https://www.mongodb.com/docs/manual/reference/method/db.collection.insertOne/ MongoDB insertOne}
+   * Handle form submission - UPDATED WITH API INTEGRATION
    */
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -434,89 +385,28 @@ const SignUp = () => {
     setLoading(true);
 
     try {
-      // Simulate checking for existing users
-      const existingUsers = JSON.parse(localStorage.getItem('users') || '[]');
-      
-      const emailExists = existingUsers.some(user => user.email === formData.email);
-      if (emailExists) {
-        setErrors({ submit: 'البريد الإلكتروني مستخدم بالفعل' });
-        setLoading(false);
-        openModal(
-          'error',
-          'خطأ في التسجيل',
-          'البريد الإلكتروني مستخدم بالفعل. الرجاء استخدام بريد إلكتروني آخر أو تسجيل الدخول.'
-        );
-        return;
-      }
-
-      const nationalIdExists = existingUsers.some(user => user.nationalId === formData.nationalId);
-      if (nationalIdExists) {
-        setErrors({ submit: 'رقم الهوية الوطنية مستخدم بالفعل' });
-        setLoading(false);
-        openModal(
-          'error',
-          'خطأ في التسجيل',
-          'رقم الهوية الوطنية مستخدم بالفعل. الرجاء التحقق من البيانات المدخلة.'
-        );
-        return;
-      }
-
-      // Simulate API call delay
-      await new Promise(resolve => setTimeout(resolve, 1500));
-
-      const currentDate = new Date().toISOString();
-      
-      /**
-       * Person Document (Persons Collection)
-       * Contains demographic information shared across all user types
-       */
-      const personData = {
-        _id: Date.now(), // In production, this would be MongoDB ObjectId
-        nationalId: formData.nationalId,
+      // Prepare registration data for API
+      const registrationData = {
+        // Person data
         firstName: formData.firstName.trim(),
         lastName: formData.lastName.trim(),
-        dateOfBirth: new Date(formData.dateOfBirth).toISOString(),
+        dateOfBirth: formData.dateOfBirth,
+        nationalId: isMinor ? null : formData.nationalId.trim(),
+        parentNationalId: isMinor ? formData.parentNationalId.trim() : null,
+        isMinor: isMinor,
         gender: formData.gender,
-        phoneNumber: formData.phoneNumber.replace(/\s/g, ''),
-        address: formData.address.trim() || undefined, // Optional field
-        createdAt: currentDate,
-        updatedAt: currentDate
-      };
-
-      /**
-       * Account Document (Accounts Collection)
-       * Contains authentication credentials and role information
-       * 
-       * SECURITY NOTE: In production, password MUST be hashed on backend with bcrypt
-       * NEVER hash passwords on frontend or send plain passwords in logs/alerts
-       */
-      const accountData = {
-        _id: Date.now() + 1,
+        phoneNumber: formData.phoneNumber.trim(),
+        address: formData.address.trim() || null,
+        
+        // Account data
         email: formData.email.trim().toLowerCase(),
-        password: formData.password, // Will be bcrypt hashed on backend in production
-        roles: ['patient'], // Patient role only
-        personId: personData._id,
-        isActive: true,
-        lastLogin: null,
-        createdAt: currentDate,
-        updatedAt: currentDate
-      };
-
-      /**
-       * Patient Document (Patients Collection)
-       * Contains medical profile and health information
-       */
-      const patientData = {
-        _id: Date.now() + 2,
-        personId: personData._id,
+        password: formData.password,
         
-        // Basic Medical Information
-        bloodType: formData.bloodType || undefined,
-        height: formData.height ? parseFloat(formData.height) : undefined,
-        weight: formData.weight ? parseFloat(formData.weight) : undefined,
-        smokingStatus: formData.smokingStatus || undefined,
-        
-        // Health History Arrays
+        // Patient data
+        bloodType: formData.bloodType || null,
+        height: formData.height ? parseFloat(formData.height) : null,
+        weight: formData.weight ? parseFloat(formData.weight) : null,
+        smokingStatus: formData.smokingStatus || null,
         allergies: formData.allergies.trim() 
           ? formData.allergies.split(',').map(item => item.trim()).filter(item => item)
           : [],
@@ -526,67 +416,45 @@ const SignUp = () => {
         familyHistory: formData.familyHistory.trim()
           ? formData.familyHistory.split(',').map(item => item.trim()).filter(item => item)
           : [],
-        
-        // Emergency Contact Object (Required fields)
         emergencyContact: {
           name: formData.emergencyContactName.trim(),
           relationship: formData.emergencyContactRelationship.trim(),
-          phoneNumber: formData.emergencyContactPhone.replace(/\s/g, '')
-        },
-        
-        createdAt: currentDate,
-        updatedAt: currentDate
+          phone: formData.emergencyContactPhone.trim()
+        }
       };
 
-      /**
-       * Combined user object for localStorage
-       * In production, these would be three separate API calls to create documents
-       */
-      const newUser = {
-        person: personData,
-        account: accountData,
-        patient: patientData,
-        
-        // Flattened data for easy access (used for login)
-        id: accountData._id,
-        email: accountData.email,
-        password: accountData.password,
-        role: 'patient',
-        nationalId: personData.nationalId,
-        firstName: personData.firstName,
-        lastName: personData.lastName,
-        phoneNumber: personData.phoneNumber
-      };
-
-      // Save to localStorage (simulating database)
-      existingUsers.push(newUser);
-      localStorage.setItem('users', JSON.stringify(existingUsers));
+      // Call API
+      const response = await authAPI.register(registrationData);
 
       setLoading(false);
 
-      // Show success modal with secure message (NO PASSWORD SHOWN)
+      // Show success modal
       openModal(
         'success',
         'تم إنشاء الحساب بنجاح! ✅',
-        `مرحباً ${formData.firstName} ${formData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nيمكنك الآن تسجيل الدخول باستخدام البريد الإلكتروني:\n${formData.email}`,
+        isMinor 
+          ? `مرحباً ${formData.firstName} ${formData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nمعرف الطفل الخاص بك: ${response.childId}\n\nيمكنك الآن تسجيل الدخول باستخدام البريد الإلكتروني:\n${formData.email}`
+          : `مرحباً ${formData.firstName} ${formData.lastName}\n\nتم تسجيلك كمريض في منصة Patient 360° بنجاح.\n\nيمكنك الآن تسجيل الدخول باستخدام البريد الإلكتروني:\n${formData.email}`,
         () => navigate('/')
       );
       
     } catch (error) {
+      console.error('Registration error:', error);
       setLoading(false);
-      setErrors({ submit: 'حدث خطأ أثناء إنشاء الحساب. الرجاء المحاولة مرة أخرى.' });
+      
+      const errorMessage = error.message || 'حدث خطأ أثناء إنشاء الحساب. الرجاء المحاولة مرة أخرى.';
+      
+      setErrors({ submit: errorMessage });
       openModal(
         'error',
-        'خطأ في النظام',
-        'حدث خطأ أثناء إنشاء الحساب. الرجاء المحاولة مرة أخرى لاحقاً.'
+        'خطأ في التسجيل',
+        errorMessage
       );
     }
   };
 
   /**
-   * Handles input field changes and clears associated errors
-   * 
-   * @param {Event} e - Input change event
+   * Handle input changes
    */
   const handleChange = (e) => {
     const { name, value } = e.target;
@@ -604,11 +472,15 @@ const SignUp = () => {
     }
   };
 
+  if (loading) {
+    return <LoadingSpinner message="جاري إنشاء حسابك..." />;
+  }
+
   return (
     <div className="signup-page">
       <Navbar />
       
-      {/* Custom Modal Component */}
+      {/* Modal */}
       {modal.isOpen && (
         <div className="modal-overlay" onClick={closeModal}>
           <div className="modal-container" onClick={(e) => e.stopPropagation()}>
@@ -634,7 +506,7 @@ const SignUp = () => {
       
       <div className="signup-container">
         <div className="signup-wrapper">
-          {/* Progress Bar - Fixed for RTL */}
+          {/* Progress Bar */}
           <div className="progress-bar">
             <div className="progress-fill" style={{ width: `${(currentStep / 4) * 100}%` }}></div>
             <div className="progress-steps">
@@ -668,12 +540,10 @@ const SignUp = () => {
             </div>
           )}
 
-          {/* Form Content */}
+          {/* Form */}
           <form onSubmit={handleSubmit} className="signup-form">
             
-            {/* ============================================ */}
-            {/* STEP 1: Personal Information (Persons Collection) */}
-            {/* ============================================ */}
+            {/* STEP 1: Personal Information */}
             {currentStep === 1 && (
               <div className="form-step">
                 <div className="form-row">
@@ -737,6 +607,47 @@ const SignUp = () => {
                   </div>
 
                   <div className="form-group">
+                    <label className="form-label">تاريخ الميلاد *</label>
+                    <input
+                      type="date"
+                      name="dateOfBirth"
+                      className={`form-input ${errors.dateOfBirth ? 'error' : ''}`}
+                      value={formData.dateOfBirth}
+                      onChange={handleDateOfBirthChange}
+                      max={getTodayDate()}
+                    />
+                    {errors.dateOfBirth && <span className="error-message">{errors.dateOfBirth}</span>}
+                    {formData.dateOfBirth && isDateInPast(formData.dateOfBirth) && (
+                      <small className="form-hint" style={{ color: isMinor ? '#d32f2f' : '#059669' }}>
+                        العمر: {age} سنة {isMinor && '(قاصر - تحت 18)'}
+                      </small>
+                    )}
+                  </div>
+                </div>
+
+                {/* CONDITIONAL ID FIELD BASED ON AGE */}
+                {isMinor ? (
+                  <div className="form-group minor-warning-box">
+                    <label className="form-label" style={{ color: '#d32f2f', fontWeight: 'bold' }}>
+                      ⚠️ قاصر تحت 18 سنة - رقم هوية الوالد/الوالدة مطلوب *
+                    </label>
+                    <input
+                      type="text"
+                      name="parentNationalId"
+                      className={`form-input ${errors.parentNationalId ? 'error' : ''}`}
+                      value={formData.parentNationalId}
+                      onChange={handleChange}
+                      placeholder="رقم الهوية الوطنية للوالد/الوالدة (11 رقم)"
+                      dir="ltr"
+                      maxLength="11"
+                    />
+                    {errors.parentNationalId && <span className="error-message">{errors.parentNationalId}</span>}
+                    <small className="form-hint" style={{ color: '#d32f2f' }}>
+                      سيتم إنشاء معرف طفل خاص تلقائياً بعد التسجيل
+                    </small>
+                  </div>
+                ) : (
+                  <div className="form-group">
                     <label className="form-label">رقم الهوية الوطنية *</label>
                     <input
                       type="text"
@@ -744,31 +655,15 @@ const SignUp = () => {
                       className={`form-input ${errors.nationalId ? 'error' : ''}`}
                       value={formData.nationalId}
                       onChange={handleChange}
-                      placeholder="رقم 11"
+                      placeholder="رقم الهوية الوطنية (11 رقم)"
                       dir="ltr"
                       maxLength="11"
                     />
                     {errors.nationalId && <span className="error-message">{errors.nationalId}</span>}
                   </div>
-                </div>
+                )}
 
                 <div className="form-row">
-                  <div className="form-group">
-                    <label className="form-label">تاريخ الميلاد *</label>
-                    <input
-                      type="date"
-                      name="dateOfBirth"
-                      className={`form-input ${errors.dateOfBirth ? 'error' : ''}`}
-                      value={formData.dateOfBirth}
-                      onChange={handleChange}
-                      max={new Date().toISOString().split('T')[0]} // Prevent future dates
-                    />
-                    {errors.dateOfBirth && <span className="error-message">{errors.dateOfBirth}</span>}
-                    {formData.dateOfBirth && isDateInPast(formData.dateOfBirth) && (
-                      <small className="form-hint">العمر: {calculateAge(formData.dateOfBirth)} سنة</small>
-                    )}
-                  </div>
-
                   <div className="form-group">
                     <label className="form-label">الجنس *</label>
                     <div className="radio-group">
@@ -816,9 +711,7 @@ const SignUp = () => {
               </div>
             )}
 
-            {/* ============================================ */}
-            {/* STEP 2: Medical Information (Patients Collection) */}
-            {/* ============================================ */}
+            {/* STEP 2: Medical Information */}
             {currentStep === 2 && (
               <div className="form-step">
                 <div className="form-group">
@@ -898,9 +791,7 @@ const SignUp = () => {
               </div>
             )}
 
-            {/* ============================================ */}
-            {/* STEP 3: Health History & Emergency Contact (Patients Collection) */}
-            {/* ============================================ */}
+            {/* STEP 3: Health History & Emergency Contact */}
             {currentStep === 3 && (
               <div className="form-step">
                 <h3 style={{ marginBottom: '20px', color: '#125c7a' }}>السجل الصحي</h3>
@@ -996,9 +887,7 @@ const SignUp = () => {
               </div>
             )}
 
-            {/* ============================================ */}
-            {/* STEP 4: Password & Account Security (Accounts Collection) */}
-            {/* ============================================ */}
+            {/* STEP 4: Password */}
             {currentStep === 4 && (
               <div className="form-step">
                 <div className="form-group">

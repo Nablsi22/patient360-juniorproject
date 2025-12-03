@@ -1,23 +1,23 @@
 .signup-page {
   min-height: 100vh;
   background: linear-gradient(135deg, #f8fafb 0%, #ffffff 100%);
-  padding-top: 80px; /* Increased to separate from navbar */
+  padding-top: 80px;
 }
 
 .signup-container {
   min-height: calc(100vh - 80px);
   display: flex;
   max-width: 1400px;
-  margin: 20px auto; /* Added margin for separation */
-  gap: 0; /* No gap between sections for seamless design */
-  border-radius: 20px; /* Rounded corners for modern look */
+  margin: 20px auto;
+  gap: 0;
+  border-radius: 20px;
   overflow: hidden;
-  box-shadow: 0 20px 60px rgba(18, 92, 122, 0.12); /* Premium shadow */
+  box-shadow: 0 20px 60px rgba(18, 92, 122, 0.12);
 }
 
 .signup-wrapper {
   flex: 1;
-  padding: 50px 40px; /* Increased top padding */
+  padding: 50px 40px;
   max-width: 600px;
   margin: 0 auto;
   background: white;
@@ -26,32 +26,32 @@
 /* Progress Bar - Fixed for RTL */
 .progress-bar {
   position: relative;
-  height: 70px; /* Increased height for better visibility */
+  height: 70px;
   margin-bottom: 35px;
-  direction: rtl; /* RTL support */
+  direction: rtl;
 }
 
 .progress-fill {
   position: absolute;
-  top: 28px; /* Centered with steps */
-  right: 0; /* Start from right for RTL */
-  height: 5px; /* Slightly thicker */
-  background: linear-gradient(90deg, #a23f97 0%, #125c7a 100%); /* Reversed gradient for RTL */
-  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1); /* Smooth easing */
+  top: 28px;
+  right: 0;
+  height: 5px;
+  background: linear-gradient(90deg, #a23f97 0%, #125c7a 100%);
+  transition: width 0.5s cubic-bezier(0.4, 0, 0.2, 1);
   border-radius: 3px;
-  box-shadow: 0 2px 8px rgba(162, 63, 151, 0.3); /* Glowing effect */
+  box-shadow: 0 2px 8px rgba(162, 63, 151, 0.3);
 }
 
 .progress-steps {
   display: flex;
   justify-content: space-between;
   position: relative;
-  direction: rtl; /* RTL support */
-  flex-direction: row; /* Ensure proper RTL order */
+  direction: rtl;
+  flex-direction: row;
 }
 
 .progress-step {
-  width: 50px; /* Larger for better visibility */
+  width: 50px;
   height: 50px;
   background: white;
   border: 3px solid #e5e7eb;
@@ -165,7 +165,7 @@
 .radio-group {
   display: flex;
   gap: 40px;
-  justify-content: center; /* Centered for better RTL */
+  justify-content: center;
 }
 
 .radio-label {
@@ -468,19 +468,18 @@
   }
 }
 
-/* Side Illustration - ENHANCED WITH SEPARATION FROM NAVBAR */
+/* Side Illustration */
 .signup-illustration {
-  flex: 0 0 450px; /* Slightly wider */
+  flex: 0 0 450px;
   position: relative;
-  padding: 80px 45px 60px; /* Increased top padding to move text up */
+  padding: 80px 45px 60px;
   display: flex;
-  align-items: flex-start; /* Align content to top */
+  align-items: flex-start;
   justify-content: center;
   overflow: hidden;
-  background: #125c7a; /* Fallback color */
+  background: #125c7a;
 }
 
-/* Animated gradient background */
 .signup-illustration::before {
   content: '';
   position: absolute;
@@ -501,7 +500,6 @@
   z-index: 0;
 }
 
-/* Alternative animated gradient effect */
 .signup-illustration::after {
   content: '';
   position: absolute;
@@ -550,7 +548,6 @@
   }
 }
 
-/* Content above the animated background */
 .illustration-content {
   color: white;
   text-align: center;
@@ -824,6 +821,42 @@
   color: #6b7280;
   font-style: italic;
   font-family: 'Cairo', sans-serif;
+}
+
+/* ============================================ */
+/* NEW: Minor Warning Box - Under 18 Support   */
+/* ============================================ */
+.minor-warning-box {
+  background: linear-gradient(135deg, #fff3e0 0%, #ffe0b2 100%);
+  border: 2px solid #ff9800;
+  border-radius: 12px;
+  padding: 20px;
+  margin: 20px 0;
+  animation: pulse-warning 2s infinite;
+}
+
+@keyframes pulse-warning {
+  0%, 100% {
+    box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.4);
+  }
+  50% {
+    box-shadow: 0 0 0 8px rgba(255, 152, 0, 0);
+  }
+}
+
+.minor-warning-box .form-label {
+  color: #d32f2f !important;
+  font-size: 1.05rem;
+}
+
+.minor-warning-box .form-input {
+  border: 2px solid #ff9800;
+  background: white;
+}
+
+.minor-warning-box .form-input:focus {
+  border-color: #f57c00;
+  box-shadow: 0 0 0 4px rgba(255, 152, 0, 0.15);
 }
 
 /* Responsive Design */
