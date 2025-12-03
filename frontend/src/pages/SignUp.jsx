@@ -634,11 +634,11 @@ const SignUp = () => {
       
       <div className="signup-container">
         <div className="signup-wrapper">
-          {/* Progress Bar */}
+          {/* Progress Bar - Fixed for RTL */}
           <div className="progress-bar">
             <div className="progress-fill" style={{ width: `${(currentStep / 4) * 100}%` }}></div>
             <div className="progress-steps">
-              {[1, 2, 3, 4].map(step => (
+              {[4, 3, 2, 1].map(step => (
                 <div 
                   key={step} 
                   className={`progress-step ${currentStep >= step ? 'active' : ''} ${currentStep > step ? 'completed' : ''}`}
@@ -1106,7 +1106,7 @@ const SignUp = () => {
         {/* Side Illustration */}
         <div className="signup-illustration">
           <div className="illustration-content">
-            <h2>مرحباً بك في Patient 360°</h2>
+            <h2>مرحباً بك في<br />Patient 360°</h2>
             <p>انضم إلى منصة الرعاية الصحية الرائدة</p>
             
             <div className="features-list">

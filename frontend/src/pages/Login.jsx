@@ -745,8 +745,9 @@ const Login = () => {
         </div>
 
         <div className="footer-bottom">
-          جميع الحقوق محفوظة © 2024 Patient 360°. تم التطوير بكل فخر
+            تم التطوير بكل فخر      جميع الحقوق     محفوظة ©    2026    Patient 360°.   
         </div>
+       
       </footer>
 
       <style jsx>{`

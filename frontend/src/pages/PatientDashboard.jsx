@@ -330,6 +330,42 @@ const PatientDashboard = () => {
   };
 
   /**
+   * Calculates age from date of birth
+   */
+  const calculateAge = (dateString) => {
+    if (!dateString) return null;
+    const today = new Date();
+    const birthDate = new Date(dateString);
+    let age = today.getFullYear() - birthDate.getFullYear();
+    const monthDiff = today.getMonth() - birthDate.getMonth();
+    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
+      age--;
+    }
+    return age;
+  };
+
+  /**
+   * Calculates BMI from height and weight
+   */
+  const calculateBMI = (height, weight) => {
+    if (!height || !weight) return null;
+    const heightInMeters = height / 100;
+    const bmi = weight / (heightInMeters * heightInMeters);
+    return bmi.toFixed(1);
+  };
+
+  /**
+   * Gets BMI category
+   */
+  const getBMICategory = (bmi) => {
+    if (!bmi) return null;
+    if (bmi < 18.5) return 'نقص الوزن';
+    if (bmi < 25) return 'وزن طبيعي';
+    if (bmi < 30) return 'وزن زائد';
+    return 'سمنة';
+  };
+
+  /**
    * Calculates health statistics
    */
   const getHealthStats = () => {
@@ -355,6 +391,9 @@ const PatientDashboard = () => {
   }
 
   const stats = getHealthStats();
+  const age = calculateAge(user.dateOfBirth);
+  const bmi = calculateBMI(user.patient?.height, user.patient?.weight);
+  const bmiCategory = getBMICategory(bmi);
 
   return (
     <div className="patient-dashboard">
@@ -448,14 +487,14 @@ const PatientDashboard = () => {
           </button>
         </div>
 
-        {/* Overview Section - Beautiful Personal Information */}
+        {/* Overview Section - Complete Patient Profile */}
         {activeSection === 'overview' && (
           <div className="section-content">
             {/* Profile Header Card */}
             <div className="profile-header-card">
               <div className="profile-avatar">
                 <div className="avatar-circle">
-                  <span className="avatar-icon">👤</span>
+                  <span className="avatar-icon">{user.gender === 'male' ? '👨' : '👩'}</span>
                 </div>
                 <div className="avatar-badge">
                   <span className="badge-icon">✓</span>
@@ -464,6 +503,26 @@ const PatientDashboard = () => {
               <div className="profile-header-info">
                 <h1 className="profile-name">{user.firstName} {user.lastName}</h1>
                 <p className="profile-role">مريض - Patient 360°</p>
+                <div className="profile-meta-info">
+                  {age && (
+                    <div className="meta-item">
+                      <span className="meta-icon">🎂</span>
+                      <span className="meta-text">{age} سنة</span>
+                    </div>
+                  )}
+                  {user.gender && (
+                    <div className="meta-item">
+                      <span className="meta-icon">{user.gender === 'male' ? '♂️' : '♀️'}</span>
+                      <span className="meta-text">{user.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
+                    </div>
+                  )}
+                  {user.patient?.bloodType && (
+                    <div className="meta-item">
+                      <span className="meta-icon">🩸</span>
+                      <span className="meta-text">{user.patient.bloodType}</span>
+                    </div>
+                  )}
+                </div>
                 <div className="profile-status">
                   <span className="status-indicator active"></span>
                   <span className="status-text">حساب نشط</span>
@@ -471,15 +530,64 @@ const PatientDashboard = () => {
               </div>
             </div>
 
-            {/* Personal Information Grid */}
-            <div className="personal-info-section">
-              <h2 className="section-title">
-                <span className="title-icon">📋</span>
-                المعلومات الشخصية
-              </h2>
+            {/* Quick Stats */}
+            <div className="quick-stats-grid">
+              <div className="quick-stat-card visits">
+                <div className="stat-icon-wrapper">
+                  <span className="stat-icon-large">📋</span>
+                </div>
+                <div className="stat-content">
+                  <h3 className="stat-number">{stats.totalVisits}</h3>
+                  <p className="stat-label">زيارة طبية</p>
+                </div>
+              </div>
+              
+              <div className="quick-stat-card medications">
+                <div className="stat-icon-wrapper">
+                  <span className="stat-icon-large">💊</span>
+                </div>
+                <div className="stat-content">
+                  <h3 className="stat-number">{stats.totalMedications}</h3>
+                  <p className="stat-label">دواء موصوف</p>
+                </div>
+              </div>
+              
+              {bmi && (
+                <div className="quick-stat-card bmi">
+                  <div className="stat-icon-wrapper">
+                    <span className="stat-icon-large">⚖️</span>
+                  </div>
+                  <div className="stat-content">
+                    <h3 className="stat-number">{bmi}</h3>
+                    <p className="stat-label">مؤشر كتلة الجسم</p>
+                    <span className="stat-badge">{bmiCategory}</span>
+                  </div>
+                </div>
+              )}
+              
+              {user.patient?.allergies && user.patient.allergies.length > 0 && (
+                <div className="quick-stat-card allergies">
+                  <div className="stat-icon-wrapper">
+                    <span className="stat-icon-large">⚠️</span>
+                  </div>
+                  <div className="stat-content">
+                    <h3 className="stat-number">{user.patient.allergies.length}</h3>
+                    <p className="stat-label">حساسية مسجلة</p>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* Personal Information Section */}
+            <div className="data-section">
+              <div className="section-header">
+                <div className="section-title-wrapper">
+                  <span className="section-icon">👤</span>
+                  <h2 className="section-title">المعلومات الشخصية</h2>
+                </div>
+              </div>
               
               <div className="info-cards-grid">
-                {/* Contact Information Card */}
                 <div className="info-display-card">
                   <div className="card-icon-header">
                     <div className="icon-circle email">
@@ -507,7 +615,7 @@ const PatientDashboard = () => {
                     <div className="icon-circle id">
                       <span>🆔</span>
                     </div>
-                    <h3>رقم الهوية</h3>
+                    <h3>رقم الهوية الوطنية</h3>
                   </div>
                   <p className="card-value">{user.nationalId || 'غير محدد'}</p>
                   <span className="card-subtitle">الرقم الوطني</span>
@@ -520,8 +628,8 @@ const PatientDashboard = () => {
                     </div>
                     <h3>تاريخ الميلاد</h3>
                   </div>
-                  <p className="card-value">{user.dateOfBirth ? new Date(user.dateOfBirth).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }) : 'غير محدد'}</p>
-                  <span className="card-subtitle">العمر: {user.dateOfBirth ? Math.floor((new Date() - new Date(user.dateOfBirth)) / 31536000000) + ' سنة' : '-'}</span>
+                  <p className="card-value">{formatDate(user.dateOfBirth)}</p>
+                  <span className="card-subtitle">العمر: {age ? age + ' سنة' : 'غير محدد'}</span>
                 </div>
 
                 {user.gender && (
@@ -538,7 +646,7 @@ const PatientDashboard = () => {
                 )}
 
                 {user.address && (
-                  <div className="info-display-card">
+                  <div className="info-display-card full-width">
                     <div className="card-icon-header">
                       <div className="icon-circle address">
                         <span>📍</span>
@@ -552,17 +660,187 @@ const PatientDashboard = () => {
               </div>
             </div>
 
+            {/* Medical Information Section */}
+            <div className="data-section">
+              <div className="section-header">
+                <div className="section-title-wrapper">
+                  <span className="section-icon">🏥</span>
+                  <h2 className="section-title">المعلومات الطبية</h2>
+                </div>
+              </div>
+              
+              <div className="medical-info-grid">
+                {user.patient?.bloodType && (
+                  <div className="medical-card blood-type">
+                    <div className="medical-card-header">
+                      <div className="medical-icon">🩸</div>
+                      <h3>فصيلة الدم</h3>
+                    </div>
+                    <div className="medical-value-large">{user.patient.bloodType}</div>
+                    <div className="medical-footer">مهم في حالات الطوارئ</div>
+                  </div>
+                )}
+
+                {user.patient?.height && (
+                  <div className="medical-card height">
+                    <div className="medical-card-header">
+                      <div className="medical-icon">📏</div>
+                      <h3>الطول</h3>
+                    </div>
+                    <div className="medical-value-large">{user.patient.height}</div>
+                    <div className="medical-unit">سم</div>
+                  </div>
+                )}
+
+                {user.patient?.weight && (
+                  <div className="medical-card weight">
+                    <div className="medical-card-header">
+                      <div className="medical-icon">⚖️</div>
+                      <h3>الوزن</h3>
+                    </div>
+                    <div className="medical-value-large">{user.patient.weight}</div>
+                    <div className="medical-unit">كجم</div>
+                  </div>
+                )}
+
+                {bmi && (
+                  <div className="medical-card bmi-card">
+                    <div className="medical-card-header">
+                      <div className="medical-icon">📊</div>
+                      <h3>مؤشر كتلة الجسم</h3>
+                    </div>
+                    <div className="medical-value-large">{bmi}</div>
+                    <div className="bmi-category-badge">{bmiCategory}</div>
+                  </div>
+                )}
+
+                {user.patient?.smokingStatus && (
+                  <div className="medical-card smoking">
+                    <div className="medical-card-header">
+                      <div className="medical-icon">🚭</div>
+                      <h3>حالة التدخين</h3>
+                    </div>
+                    <div className="smoking-status">
+                      {user.patient.smokingStatus === 'non-smoker' && 'غير مدخن'}
+                      {user.patient.smokingStatus === 'former smoker' && 'مدخن سابق'}
+                      {user.patient.smokingStatus === 'current smoker' && 'مدخن حالي'}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+
+            {/* Health History Section */}
+            {(user.patient?.allergies?.length > 0 || 
+              user.patient?.chronicDiseases?.length > 0 || 
+              user.patient?.familyHistory?.length > 0) && (
+              <div className="data-section">
+                <div className="section-header">
+                  <div className="section-title-wrapper">
+                    <span className="section-icon">📜</span>
+                    <h2 className="section-title">السجل الصحي</h2>
+                  </div>
+                </div>
+                
+                <div className="health-history-grid">
+                  {user.patient?.allergies?.length > 0 && (
+                    <div className="history-card allergies-card">
+                      <div className="history-header">
+                        <div className="history-icon">⚠️</div>
+                        <h3>الحساسية</h3>
+                        <span className="count-badge">{user.patient.allergies.length}</span>
+                      </div>
+                      <ul className="history-list">
+                        {user.patient.allergies.map((allergy, index) => (
+                          <li key={index} className="history-item">
+                            <span className="item-bullet">•</span>
+                            <span className="item-text">{allergy}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {user.patient?.chronicDiseases?.length > 0 && (
+                    <div className="history-card diseases-card">
+                      <div className="history-header">
+                        <div className="history-icon">🏥</div>
+                        <h3>الأمراض المزمنة</h3>
+                        <span className="count-badge">{user.patient.chronicDiseases.length}</span>
+                      </div>
+                      <ul className="history-list">
+                        {user.patient.chronicDiseases.map((disease, index) => (
+                          <li key={index} className="history-item">
+                            <span className="item-bullet">•</span>
+                            <span className="item-text">{disease}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {user.patient?.familyHistory?.length > 0 && (
+                    <div className="history-card family-card">
+                      <div className="history-header">
+                        <div className="history-icon">👨‍👩‍👧‍👦</div>
+                        <h3>التاريخ العائلي المرضي</h3>
+                        <span className="count-badge">{user.patient.familyHistory.length}</span>
+                      </div>
+                      <ul className="history-list">
+                        {user.patient.familyHistory.map((history, index) => (
+                          <li key={index} className="history-item">
+                            <span className="item-bullet">•</span>
+                            <span className="item-text">{history}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {/* Emergency Contact Section */}
+            {user.patient?.emergencyContact && (
+              <div className="data-section">
+                <div className="section-header">
+                  <div className="section-title-wrapper">
+                    <span className="section-icon">🚨</span>
+                    <h2 className="section-title">جهة الاتصال في حالات الطوارئ</h2>
+                  </div>
+                </div>
+                
+                <div className="emergency-contact-card">
+                  <div className="emergency-header">
+                    <div className="emergency-icon-large">📞</div>
+                    <div className="emergency-info">
+                      <h3 className="emergency-name">{user.patient.emergencyContact.name}</h3>
+                      <p className="emergency-relationship">{user.patient.emergencyContact.relationship}</p>
+                    </div>
+                  </div>
+                  <div className="emergency-phone">
+                    <span className="phone-icon">📱</span>
+                    <span className="phone-number" dir="ltr">{user.patient.emergencyContact.phoneNumber}</span>
+                  </div>
+                  <div className="emergency-note">
+                    <span className="note-icon">ℹ️</span>
+                    <span className="note-text">سيتم التواصل مع هذا الشخص في حالات الطوارئ الطبية</span>
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Welcome Message Card */}
             <div className="welcome-message-card">
               <div className="message-icon">💚</div>
               <div className="message-content">
                 <h3>مرحباً بك في Patient 360°</h3>
                 <p>
-                  نحن سعداء بوجودك معنا. يمكنك الآن الاطلاع على سجل زياراتك الطبية،
-                  متابعة أدويتك الحالية، والاستفادة من خدماتنا الطبية المتقدمة.
+                  نحن سعداء بوجودك معنا يا {user.firstName}. تم تسجيل جميع بياناتك بنجاح في النظام،
+                  ويمكنك الآن الاستفادة من جميع خدماتنا الطبية المتقدمة.
                 </p>
                 <p>
-                  للوصول إلى المعلومات الطبية، استخدم التبويبات في الأعلى.
+                  للوصول إلى سجل زياراتك الطبية ومتابعة أدويتك، استخدم التبويبات في الأعلى.
                 </p>
               </div>
             </div>
