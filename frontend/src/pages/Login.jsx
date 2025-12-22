@@ -1,6 +1,8 @@
+
 import React, { useState, useEffect } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
+import { authAPI } from '../services/api';
 import '../styles/Login.css';
 
 const Login = () => {
@@ -167,118 +169,82 @@ const Login = () => {
    * Works with accounts created through SignUp page
    */
   const handleLogin = async (e) => {
-    e.preventDefault();
-    setIsLoading(true);
+  e.preventDefault();
+  
+  // Validation
+  if (!email.trim()) {
+    openModal('error', 'خطأ', 'الرجاء إدخال البريد الإلكتروني');
+    return;
+  }
+  
+  if (!password.trim()) {
+    openModal('error', 'خطأ', 'الرجاء إدخال كلمة المرور');
+    return;
+  }
+  
+  setIsLoading(true);
+  
+  try {
+    // ✅ UPDATED: Call Backend API
+    const response = await authAPI.login({
+      email: email.trim().toLowerCase(),
+      password: password
+    });
+
+    setIsLoading(false);
+
+    // Show success modal and route based on role
+    const user = response.user;
+    const roleLabels = {
+      patient: 'مريض',
+      doctor: 'طبيب',
+      admin: 'مسؤول النظام'
+    };
+
+    const primaryRole = user.roles && user.roles[0];
+
+    openModal(
+      'success',
+      'تم تسجيل الدخول بنجاح! ✅',
+      `مرحباً ${user.firstName} ${user.lastName}\n\nتم تسجيل دخولك كـ ${roleLabels[primaryRole]}`,
+      () => {
+        // Route based on user role
+        const dashboardRoutes = {
+          'patient': '/patient-dashboard',
+          'doctor': '/doctor-dashboard',
+          'admin': '/admin-dashboard'
+        };
+        
+        navigate(dashboardRoutes[primaryRole] || '/');
+      }
+    );
+
+    console.log('✅ Login successful:', {
+      email: user.email,
+      role: primaryRole,
+      name: `${user.firstName} ${user.lastName}`
+    });
+
+  } catch (error) {
+    setIsLoading(false);
+    console.error('❌ Login error:', error);
     
-    try {
-      // Simulate API call delay for better UX
-      await new Promise(resolve => setTimeout(resolve, 800));
-
-      // Get users from localStorage
-      const users = JSON.parse(localStorage.getItem('users') || '[]');
-
-      // Find user with matching email
-      const user = users.find(u => u.email === email.trim());
-
-      // Check if user exists
-      if (!user) {
-        setIsLoading(false);
-        openModal(
-          'error',
-          'خطأ في تسجيل الدخول',
-          'البريد الإلكتروني غير مسجل.\n\nالرجاء إنشاء حساب جديد من صفحة التسجيل.'
-        );
-        return;
-      }
-
-      // Check if password matches
-      if (user.password !== password) {
-        setIsLoading(false);
-        openModal(
-          'error',
-          'خطأ في تسجيل الدخول',
-          'كلمة المرور غير صحيحة.\n\nتأكد من كتابة كلمة المرور بشكل صحيح.'
-        );
-        return;
-      }
-
-      // Check if account is active (if the field exists)
-      if (user.account && user.account.isActive === false) {
-        setIsLoading(false);
-        openModal(
-          'error',
-          'الحساب معطل',
-          'هذا الحساب معطل.\n\nالرجاء التواصل مع الإدارة لتفعيل حسابك.'
-        );
-        return;
-      }
-
-      // Successful login - Set current user
-      const currentUser = {
-        id: user.id,
-        email: user.email,
-        role: user.role,
-        firstName: user.firstName || user.person?.firstName,
-        lastName: user.lastName || user.person?.lastName,
-        phoneNumber: user.phoneNumber || user.person?.phoneNumber,
-        nationalId: user.nationalId || user.person?.nationalId,
-        dateOfBirth: user.dateOfBirth || user.person?.dateOfBirth,
-        gender: user.gender || user.person?.gender,
-        address: user.address || user.person?.address
-      };
-
-      localStorage.setItem('currentUser', JSON.stringify(currentUser));
-
-      // Update last login time
-      user.account = user.account || {};
-      user.account.lastLogin = new Date().toISOString();
-      
-      const userIndex = users.findIndex(u => u.email === email.trim());
-      users[userIndex] = user;
-      localStorage.setItem('users', JSON.stringify(users));
-
-      setIsLoading(false);
-
-      // Show success modal and route based on role
-      const roleLabels = {
-        patient: 'مريض',
-        doctor: 'طبيب',
-        admin: 'مسؤول النظام'
-      };
-
-      openModal(
-        'success',
-        'تم تسجيل الدخول بنجاح! ✅',
-        `مرحباً ${currentUser.firstName} ${currentUser.lastName}\n\nتم تسجيل دخولك كـ ${roleLabels[currentUser.role]}`,
-        () => {
-          // Route based on user role
-          const dashboardRoutes = {
-            'patient': '/patient-dashboard',
-            'doctor': '/doctor-dashboard',
-            'admin': '/admin-dashboard'
-          };
-          
-          navigate(dashboardRoutes[currentUser.role] || '/');
-        }
-      );
-
-      console.log('✅ Login successful:', {
-        email: currentUser.email,
-        role: currentUser.role,
-        name: `${currentUser.firstName} ${currentUser.lastName}`
-      });
-
-    } catch (error) {
-      setIsLoading(false);
-      console.error('Login error:', error);
-      
-      openModal(
-        'error',
-        'خطأ في النظام',
-        'حدث خطأ غير متوقع.\n\nالرجاء المحاولة مرة أخرى لاحقاً.'
-      );
+    // Handle specific error messages from backend
+    let errorMessage = 'حدث خطأ أثناء تسجيل الدخول';
+    
+    if (error.message) {
+      errorMessage = error.message;
+    } else if (error.error) {
+      errorMessage = error.error;
     }
-  };
+    
+    openModal(
+      'error',
+      'خطأ في تسجيل الدخول',
+      errorMessage
+    );
+  }
+};
 
   const handleContactSubmit = (e) => {
     e.preventDefault();
