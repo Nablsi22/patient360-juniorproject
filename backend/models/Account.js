@@ -42,14 +42,9 @@ const accountSchema = new mongoose.Schema({
   lastLogin: {
     type: Date,
     default: null
-  },
-  loginAttempts: {
-    type: Number,
-    default: 0
-  },
-  lockUntil: {
-    type: Date
   }
+  // ❌ REMOVED: loginAttempts
+  // ❌ REMOVED: lockUntil
 }, {
   timestamps: true,
   collection: 'accounts'
@@ -82,10 +77,7 @@ accountSchema.methods.comparePassword = async function(candidatePassword) {
   }
 };
 
-// Check if account is locked
-accountSchema.methods.isLocked = function() {
-  return !!(this.lockUntil && this.lockUntil > Date.now());
-};
+// ❌ REMOVED: isLocked method
 
 // Indexes
 accountSchema.index({ email: 1 }, { unique: true });

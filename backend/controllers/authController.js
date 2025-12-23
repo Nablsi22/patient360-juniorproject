@@ -123,13 +123,13 @@ exports.signup = async (req, res) => {
 
     if (!isMinor) {
   console.log('🔍 Checking for existing person (adult)...');
-  console.log('🔎 National ID being checked:', nationalId);  // ← أضف هالسطر
-  console.log('🔎 National ID type:', typeof nationalId);    // ← وهالسطر
+  console.log('🔎 National ID being checked:', nationalId);
+  console.log('🔎 National ID type:', typeof nationalId);
   
   const existingPerson = await Person.findOne({ nationalId });
   if (existingPerson) {
     console.log('❌ National ID already exists');
-    console.log('🔎 Existing person:', existingPerson);  // ← أضف هالسطر
+    console.log('🔎 Existing person:', existingPerson);
     return res.status(400).json({
       success: false,
       message: 'رقم الهوية الوطنية مستخدم بالفعل'
@@ -267,26 +267,15 @@ personData.childId = undefined;
     if (height) patientData.height = parseFloat(height);
     if (weight) patientData.weight = parseFloat(weight);
     if (smokingStatus) patientData.smokingStatus = smokingStatus;
-    
-    if (allergies && Array.isArray(allergies)) {
-      patientData.allergies = allergies.filter(item => item && item.trim());
-    } else if (allergies && typeof allergies === 'string' && allergies.trim()) {
-      patientData.allergies = allergies.split(',').map(item => item.trim()).filter(item => item);
+    if (allergies && Array.isArray(allergies) && allergies.length > 0) {
+      patientData.allergies = allergies;
     }
-    
-    if (chronicDiseases && Array.isArray(chronicDiseases)) {
-      patientData.chronicDiseases = chronicDiseases.filter(item => item && item.trim());
-    } else if (chronicDiseases && typeof chronicDiseases === 'string' && chronicDiseases.trim()) {
-      patientData.chronicDiseases = chronicDiseases.split(',').map(item => item.trim()).filter(item => item);
+    if (chronicDiseases && Array.isArray(chronicDiseases) && chronicDiseases.length > 0) {
+      patientData.chronicDiseases = chronicDiseases;
     }
-    
-    if (familyHistory && Array.isArray(familyHistory)) {
-      patientData.familyHistory = familyHistory.filter(item => item && item.trim());
-    } else if (familyHistory && typeof familyHistory === 'string' && familyHistory.trim()) {
-      patientData.familyHistory = familyHistory.split(',').map(item => item.trim()).filter(item => item);
+    if (familyHistory && Array.isArray(familyHistory) && familyHistory.length > 0) {
+      patientData.familyHistory = familyHistory;
     }
-
-    console.log('📦 Patient data prepared:', patientData);
 
     // ========================================
     // 9. إنشاء Patient Document
@@ -296,19 +285,18 @@ personData.childId = undefined;
     console.log('✅ Step 7: Patient created with ID:', patient._id);
 
     // ========================================
-    // 10. إنشاء JWT Token
+    // 10. توليد JWT Token
     // ========================================
-    console.log('🔑 Generating JWT token...');
     const token = generateToken(account._id);
     console.log('✅ Step 8: Token generated');
 
     // ========================================
     // 11. إرسال الاستجابة
     // ========================================
-    console.log('✅ SUCCESS: Sending response');
+    console.log('✅✅✅ SIGNUP SUCCESSFUL! ✅✅✅');
     res.status(201).json({
       success: true,
-      message: 'تم إنشاء الحساب بنجاح',
+      message: 'تم التسجيل بنجاح',
       token,
       user: {
         accountId: account._id,
@@ -321,7 +309,9 @@ personData.childId = undefined;
         childId: person.childId,
         isMinor: person.isMinor,
         phoneNumber: person.phoneNumber,
-        patientId: patient._id
+        dateOfBirth: person.dateOfBirth,
+        gender: person.gender,
+        address: person.address
       }
     });
 
@@ -362,7 +352,9 @@ personData.childId = undefined;
   }
 };
 
-// Login and other functions remain the same...
+// @desc    Login user
+// @route   POST /api/auth/login
+// @access  Public
 exports.login = async (req, res) => {
   try {
     const { email, password } = req.body;
@@ -375,13 +367,8 @@ exports.login = async (req, res) => {
       });
     }
 
-    if (account.isLocked()) {
-      return res.status(423).json({
-        success: false,
-        message: 'الحساب مقفل بسبب عدة محاولات فاشلة. الرجاء المحاولة لاحقاً'
-      });
-    }
-
+    // ❌ REMOVED: Check if account is locked
+    
     if (!account.isActive) {
       return res.status(403).json({
         success: false,
@@ -392,28 +379,18 @@ exports.login = async (req, res) => {
     const isPasswordCorrect = await account.comparePassword(password);
 
     if (!isPasswordCorrect) {
-      account.loginAttempts += 1;
-
-      if (account.loginAttempts >= 5) {
-        account.lockUntil = Date.now() + (15 * 60 * 1000);
-        await account.save();
-        
-        return res.status(423).json({
-          success: false,
-          message: 'تم قفل الحساب بسبب عدة محاولات فاشلة. الرجاء المحاولة بعد 15 دقيقة'
-        });
-      }
-
-      await account.save();
-
+      // ❌ REMOVED: Increment login attempts
+      // ❌ REMOVED: Lock account after 5 attempts
+      
       return res.status(401).json({
         success: false,
         message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
       });
     }
 
-    account.loginAttempts = 0;
-    account.lockUntil = null;
+    // ❌ REMOVED: Reset login attempts and lockUntil
+    
+    // Update last login
     account.lastLogin = new Date();
     await account.save();
 
@@ -498,6 +475,9 @@ exports.login = async (req, res) => {
   }
 };
 
+// @desc    Verify JWT token
+// @route   GET /api/auth/verify
+// @access  Private
 exports.verifyToken = async (req, res) => {
   try {
     const person = await Person.findById(req.account.personId);
@@ -573,6 +553,9 @@ exports.verifyToken = async (req, res) => {
   }
 };
 
+// @desc    Update last login timestamp
+// @route   POST /api/auth/update-last-login
+// @access  Private
 exports.updateLastLogin = async (req, res) => {
   try {
     req.account.lastLogin = new Date();
