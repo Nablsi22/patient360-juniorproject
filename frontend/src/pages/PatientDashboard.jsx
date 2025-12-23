@@ -1,6 +1,5 @@
 // src/pages/PatientDashboard.jsx
-// ✅ FINAL VERSION - Uses Backend API with MongoDB - FULLY ENHANCED
-// ✅ NEW: AI Medical Consultation "استشيرني" Section
+// ✅ AI Medical Consultation "استشيرني" - READY FOR BACKEND
 
 import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
@@ -9,485 +8,113 @@ import { authAPI } from '../services/api';
 import '../styles/PatientDashboard.css';
 
 /**
- * PatientDashboard Component - FINAL ENHANCED VERSION
- * 
- * ✅ Uses Backend API (MongoDB)
- * ✅ Supports minors (childId, parentNationalId)
- * ✅ Real patient data from database
- * ✅ JWT authentication
- * ✅ All signup data displayed (address, blood type, allergies, diseases, family history)
- * ✅ NEW: AI Medical Consultation "استشيرني" - Symptom-based doctor specialty recommendations
- * ✅ No unused variables
- * 
- * @component
- * @author Patient 360° Development Team
- * @version 2.0.0
+ * AI SERVICE CONFIG - BACKEND TEAM: Set isEnabled to true when AI is connected
  */
+const AI_SERVICE_CONFIG = {
+  isEnabled: false,
+  apiEndpoint: '/api/ai/consultation',
+  timeout: 30000
+};
+
+/**
+ * ALL 20 MEDICAL SPECIALIZATIONS
+ */
+const MEDICAL_SPECIALIZATIONS = [
+  { id: 'cardiologist', nameEn: 'Cardiologist', nameAr: 'طبيب قلب', icon: '❤️', color: '#ef4444', description: 'متخصص في تشخيص وعلاج أمراض القلب والأوعية الدموية' },
+  { id: 'pulmonologist', nameEn: 'Pulmonologist', nameAr: 'طبيب أمراض الرئة', icon: '🫁', color: '#3b82f6', description: 'متخصص في أمراض الجهاز التنفسي والرئتين' },
+  { id: 'general_practitioner', nameEn: 'General Practitioner', nameAr: 'طبيب عام', icon: '🩺', color: '#10b981', description: 'طبيب للفحص الشامل والتشخيص الأولي' },
+  { id: 'infectious_disease', nameEn: 'Infectious Disease Specialist', nameAr: 'طبيب أمراض معدية', icon: '🦠', color: '#f59e0b', description: 'متخصص في الأمراض المعدية والعدوى' },
+  { id: 'intensive_care', nameEn: 'Intensive Care Specialist', nameAr: 'طبيب عناية مركزة', icon: '🏥', color: '#dc2626', description: 'متخصص في رعاية الحالات الحرجة' },
+  { id: 'rheumatologist', nameEn: 'Rheumatologist', nameAr: 'طبيب روماتيزم', icon: '🦴', color: '#8b5cf6', description: 'متخصص في أمراض المفاصل والروماتيزم' },
+  { id: 'orthopedic_surgeon', nameEn: 'Orthopedic Surgeon', nameAr: 'جراح عظام', icon: '🦿', color: '#6366f1', description: 'متخصص في جراحة العظام والمفاصل' },
+  { id: 'neurologist', nameEn: 'Neurologist', nameAr: 'طبيب أعصاب', icon: '🧠', color: '#ec4899', description: 'متخصص في أمراض الجهاز العصبي' },
+  { id: 'endocrinologist', nameEn: 'Endocrinologist', nameAr: 'طبيب غدد صماء', icon: '⚗️', color: '#14b8a6', description: 'متخصص في أمراض الغدد والهرمونات' },
+  { id: 'dermatologist', nameEn: 'Dermatologist', nameAr: 'طبيب جلدية', icon: '🧴', color: '#f97316', description: 'متخصص في أمراض الجلد والشعر' },
+  { id: 'gastroenterologist', nameEn: 'Gastroenterologist', nameAr: 'طبيب جهاز هضمي', icon: '🫃', color: '#eab308', description: 'متخصص في أمراض الجهاز الهضمي' },
+  { id: 'general_surgeon', nameEn: 'General Surgeon', nameAr: 'جراح عام', icon: '🔪', color: '#64748b', description: 'متخصص في العمليات الجراحية العامة' },
+  { id: 'hepatologist', nameEn: 'Hepatologist', nameAr: 'طبيب كبد', icon: '🫀', color: '#a855f7', description: 'متخصص في أمراض الكبد والمرارة' },
+  { id: 'urologist', nameEn: 'Urologist', nameAr: 'طبيب مسالك بولية', icon: '💧', color: '#0ea5e9', description: 'متخصص في أمراض الكلى والمسالك البولية' },
+  { id: 'gynecologist', nameEn: 'Gynecologist', nameAr: 'طبيب نساء وتوليد', icon: '🤰', color: '#db2777', description: 'متخصص في صحة المرأة والحمل والولادة' },
+  { id: 'psychiatrist', nameEn: 'Psychiatrist', nameAr: 'طبيب نفسي', icon: '🧘', color: '#7c3aed', description: 'متخصص في الصحة النفسية' },
+  { id: 'hematologist', nameEn: 'Hematologist', nameAr: 'طبيب دم', icon: '🩸', color: '#be123c', description: 'متخصص في أمراض الدم' },
+  { id: 'hematologist_oncologist', nameEn: 'Hematologist/Oncologist', nameAr: 'طبيب دم/أورام', icon: '🎗️', color: '#9333ea', description: 'متخصص في أمراض الدم والأورام' },
+  { id: 'ent_specialist', nameEn: 'ENT Specialist', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂', color: '#059669', description: 'متخصص في أمراض الأذن والأنف والحنجرة' },
+  { id: 'ophthalmologist', nameEn: 'Ophthalmologist', nameAr: 'طبيب عيون', icon: '👁️', color: '#0284c7', description: 'متخصص في أمراض العيون' }
+];
+
+const consultationAPI = {
+  analyzeSymptoms: async (symptoms) => {
+    if (!AI_SERVICE_CONFIG.isEnabled) throw new Error('AI_SERVICE_NOT_ENABLED');
+    const token = localStorage.getItem('token');
+    const response = await fetch(AI_SERVICE_CONFIG.apiEndpoint, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+      body: JSON.stringify({ symptoms }),
+      signal: AbortSignal.timeout(AI_SERVICE_CONFIG.timeout)
+    });
+    if (!response.ok) throw new Error(`API_ERROR_${response.status}`);
+    return await response.json();
+  },
+  getSpecializationByName: (name) => MEDICAL_SPECIALIZATIONS.find(s => s.nameEn.toLowerCase() === name.toLowerCase()) || null
+};
+
 const PatientDashboard = () => {
   const navigate = useNavigate();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
-  
-  // Modal state
-  const [modal, setModal] = useState({
-    isOpen: false,
-    type: '',
-    title: '',
-    message: '',
-    onConfirm: null
-  });
-
-  // Visit details modal state
-  const [selectedVisit, setSelectedVisit] = useState(null);
-  const [showVisitDetails, setShowVisitDetails] = useState(false);
-  
-  // Visits data
+  const [modal, setModal] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
   const [visits, setVisits] = useState([]);
-  
-  // Active section state
   const [activeSection, setActiveSection] = useState('overview');
+  const [symptoms, setSymptoms] = useState('');
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [consultationResult, setConsultationResult] = useState(null);
+  const [consultationError, setConsultationError] = useState(null);
+  const resultRef = useRef(null);
 
-  // ========================================
-  // AI CONSULTATION STATE - "استشيرني"
-  // ========================================
-  const [consultationMessages, setConsultationMessages] = useState([
-    {
-      id: 1,
-      type: 'bot',
-      text: 'مرحباً بك في خدمة الاستشارة الطبية الذكية! 👋\n\nأنا هنا لمساعدتك في تحديد التخصص الطبي المناسب لحالتك.\n\nيرجى وصف الأعراض التي تشعر بها بالتفصيل، وسأقوم بتوجيهك للتخصص الطبي المناسب.',
-      timestamp: new Date()
-    }
-  ]);
-  const [userInput, setUserInput] = useState('');
-  const [isTyping, setIsTyping] = useState(false);
-  const chatEndRef = useRef(null);
-
-  // Medical specialties mapping for AI consultation
-  const medicalSpecialties = {
-    // Dental
-    dental: {
-      keywords: ['أسنان', 'سن', 'ضرس', 'لثة', 'فم', 'teeth', 'tooth', 'dental', 'gum', 'mouth', 'أضراس', 'تسوس', 'خلع', 'حشو', 'تقويم'],
-      specialty: 'طب الأسنان',
-      icon: '🦷',
-      description: 'يختص بعلاج جميع مشاكل الأسنان واللثة والفم'
-    },
-    // Cardiology
-    cardiology: {
-      keywords: ['قلب', 'صدر', 'ضربات', 'نبض', 'heart', 'chest', 'cardiac', 'خفقان', 'ضغط', 'شرايين', 'أوعية', 'كولسترول'],
-      specialty: 'أمراض القلب والأوعية الدموية',
-      icon: '❤️',
-      description: 'يختص بتشخيص وعلاج أمراض القلب والأوعية الدموية'
-    },
-    // Dermatology
-    dermatology: {
-      keywords: ['جلد', 'بشرة', 'حكة', 'طفح', 'skin', 'rash', 'itch', 'شعر', 'أظافر', 'حبوب', 'أكزيما', 'صدفية', 'حروق'],
-      specialty: 'الأمراض الجلدية',
-      icon: '🧴',
-      description: 'يختص بعلاج أمراض الجلد والشعر والأظافر'
-    },
-    // Ophthalmology
-    ophthalmology: {
-      keywords: ['عين', 'نظر', 'رؤية', 'eye', 'vision', 'sight', 'عيون', 'إبصار', 'نظارة', 'عدسات', 'ماء أبيض', 'ماء أزرق'],
-      specialty: 'طب العيون',
-      icon: '👁️',
-      description: 'يختص بتشخيص وعلاج أمراض العين ومشاكل النظر'
-    },
-    // ENT
-    ent: {
-      keywords: ['أذن', 'أنف', 'حنجرة', 'سمع', 'ear', 'nose', 'throat', 'hearing', 'صوت', 'بلعوم', 'لوزتين', 'جيوب أنفية', 'دوخة', 'طنين'],
-      specialty: 'أنف وأذن وحنجرة',
-      icon: '👂',
-      description: 'يختص بعلاج أمراض الأذن والأنف والحنجرة'
-    },
-    // Orthopedics
-    orthopedics: {
-      keywords: ['عظام', 'مفاصل', 'ظهر', 'عمود فقري', 'bone', 'joint', 'spine', 'back', 'ركبة', 'كتف', 'كسر', 'خلع', 'غضروف', 'روماتيزم'],
-      specialty: 'جراحة العظام والمفاصل',
-      icon: '🦴',
-      description: 'يختص بعلاج أمراض العظام والمفاصل والعمود الفقري'
-    },
-    // Neurology
-    neurology: {
-      keywords: ['صداع', 'أعصاب', 'دماغ', 'تنميل', 'headache', 'nerve', 'brain', 'numbness', 'شلل', 'رعشة', 'صرع', 'ذاكرة', 'توازن'],
-      specialty: 'الأمراض العصبية',
-      icon: '🧠',
-      description: 'يختص بتشخيص وعلاج أمراض الجهاز العصبي والدماغ'
-    },
-    // Gastroenterology
-    gastroenterology: {
-      keywords: ['معدة', 'بطن', 'هضم', 'أمعاء', 'stomach', 'abdomen', 'digestion', 'intestine', 'قولون', 'كبد', 'إسهال', 'إمساك', 'غثيان', 'قيء', 'حموضة'],
-      specialty: 'أمراض الجهاز الهضمي',
-      icon: '🫁',
-      description: 'يختص بعلاج أمراض المعدة والأمعاء والكبد'
-    },
-    // Urology
-    urology: {
-      keywords: ['كلى', 'مسالك', 'بول', 'مثانة', 'kidney', 'urinary', 'bladder', 'urine', 'بروستاتا', 'حصوات'],
-      specialty: 'المسالك البولية',
-      icon: '💧',
-      description: 'يختص بعلاج أمراض الكلى والمسالك البولية'
-    },
-    // Pulmonology
-    pulmonology: {
-      keywords: ['رئة', 'تنفس', 'سعال', 'كحة', 'lung', 'breathing', 'cough', 'respiratory', 'ضيق تنفس', 'ربو', 'حساسية صدر'],
-      specialty: 'أمراض الصدر والجهاز التنفسي',
-      icon: '🌬️',
-      description: 'يختص بعلاج أمراض الرئة والجهاز التنفسي'
-    },
-    // Endocrinology
-    endocrinology: {
-      keywords: ['سكري', 'غدة', 'هرمون', 'درقية', 'diabetes', 'thyroid', 'hormone', 'gland', 'سمنة', 'نحافة'],
-      specialty: 'الغدد الصماء والسكري',
-      icon: '⚗️',
-      description: 'يختص بعلاج أمراض الغدد والسكري والهرمونات'
-    },
-    // Psychiatry
-    psychiatry: {
-      keywords: ['اكتئاب', 'قلق', 'نفسي', 'توتر', 'depression', 'anxiety', 'mental', 'stress', 'أرق', 'نوم', 'وسواس', 'هلع', 'فوبيا'],
-      specialty: 'الطب النفسي',
-      icon: '🧘',
-      description: 'يختص بعلاج الاضطرابات النفسية والعقلية'
-    },
-    // Pediatrics
-    pediatrics: {
-      keywords: ['طفل', 'أطفال', 'رضيع', 'حديث ولادة', 'child', 'baby', 'infant', 'pediatric', 'تطعيم', 'نمو'],
-      specialty: 'طب الأطفال',
-      icon: '👶',
-      description: 'يختص بعلاج أمراض الأطفال من الولادة حتى البلوغ'
-    },
-    // Gynecology
-    gynecology: {
-      keywords: ['نسائي', 'رحم', 'مبيض', 'حمل', 'دورة', 'gynecology', 'pregnancy', 'menstrual', 'uterus', 'ولادة', 'هرمونات أنثوية'],
-      specialty: 'أمراض النساء والتوليد',
-      icon: '🤰',
-      description: 'يختص بصحة المرأة والحمل والولادة'
-    },
-    // Allergy
-    allergy: {
-      keywords: ['حساسية', 'تحسس', 'allergy', 'allergic', 'عطس', 'حكة', 'تورم', 'صدمة تحسسية'],
-      specialty: 'أمراض الحساسية والمناعة',
-      icon: '🤧',
-      description: 'يختص بتشخيص وعلاج أمراض الحساسية والمناعة'
-    },
-    // General
-    general: {
-      keywords: ['حرارة', 'حمى', 'إرهاق', 'تعب', 'fever', 'fatigue', 'tired', 'عام', 'فحص', 'checkup'],
-      specialty: 'الطب العام / الباطني',
-      icon: '🩺',
-      description: 'يختص بالفحص الشامل والتشخيص الأولي للحالات المختلفة'
-    }
+  const handleAnalyzeSymptoms = async () => {
+    if (!symptoms.trim()) { setConsultationError('Please enter your symptoms'); return; }
+    if (!AI_SERVICE_CONFIG.isEnabled) { setConsultationError('SERVICE_NOT_AVAILABLE'); return; }
+    setIsAnalyzing(true); setConsultationError(null); setConsultationResult(null);
+    try {
+      const response = await consultationAPI.analyzeSymptoms(symptoms);
+      if (response.success && response.data) {
+        const spec = consultationAPI.getSpecializationByName(response.data.recommendedSpecialization);
+        if (spec) {
+          setConsultationResult({ specialization: spec, confidence: response.data.confidence, inputSymptoms: symptoms });
+          setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
+        } else setConsultationError('SPECIALIZATION_NOT_FOUND');
+      } else setConsultationError('INVALID_RESPONSE');
+    } catch { setConsultationError('API_ERROR'); }
+    finally { setIsAnalyzing(false); }
   };
 
-  /**
-   * Analyzes user symptoms and returns appropriate medical specialty
-   * @param {string} text - User's symptom description
-   * @returns {Object} - Matched specialty information
-   */
-  const analyzeSymptoms = (text) => {
-    const lowerText = text.toLowerCase();
-    let matchedSpecialties = [];
-    let maxScore = 0;
+  const resetConsultation = () => { setSymptoms(''); setConsultationResult(null); setConsultationError(null); };
+  const openModal = (type, title, message, onConfirm = null) => setModal({ isOpen: true, type, title, message, onConfirm });
+  const closeModal = () => setModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
+  const handleModalConfirm = () => { if (modal.onConfirm) modal.onConfirm(); closeModal(); };
 
-    // Check each specialty for keyword matches
-    Object.entries(medicalSpecialties).forEach(([key, specialty]) => {
-      let score = 0;
-      specialty.keywords.forEach(keyword => {
-        if (lowerText.includes(keyword.toLowerCase())) {
-          score += 1;
-        }
-      });
-
-      if (score > 0) {
-        matchedSpecialties.push({ ...specialty, key, score });
-      }
-
-      if (score > maxScore) {
-        maxScore = score;
-      }
-    });
-
-    // Sort by score and return top matches
-    matchedSpecialties.sort((a, b) => b.score - a.score);
-
-    if (matchedSpecialties.length === 0) {
-      return {
-        found: false,
-        message: 'لم أتمكن من تحديد التخصص المناسب بناءً على الأعراض المذكورة.\n\nيرجى وصف الأعراض بمزيد من التفصيل، أو يمكنك زيارة طبيب عام للفحص الأولي والتوجيه للتخصص المناسب.'
-      };
-    }
-
-    return {
-      found: true,
-      primary: matchedSpecialties[0],
-      alternatives: matchedSpecialties.slice(1, 3)
-    };
-  };
-
-  /**
-   * Generates AI response based on symptom analysis
-   * @param {string} userMessage - User's message
-   * @returns {string} - Bot response
-   */
-  const generateConsultationResponse = (userMessage) => {
-    const analysis = analyzeSymptoms(userMessage);
-
-    if (!analysis.found) {
-      return analysis.message;
-    }
-
-    let response = `بناءً على الأعراض التي وصفتها، أنصحك بزيارة:\n\n`;
-    response += `${analysis.primary.icon} **${analysis.primary.specialty}**\n`;
-    response += `📋 ${analysis.primary.description}\n\n`;
-
-    if (analysis.alternatives && analysis.alternatives.length > 0) {
-      response += `💡 تخصصات أخرى قد تكون مفيدة:\n`;
-      analysis.alternatives.forEach(alt => {
-        response += `• ${alt.icon} ${alt.specialty}\n`;
-      });
-      response += '\n';
-    }
-
-    response += `⚠️ **تنبيه هام:**\nهذه التوصية استرشادية فقط ولا تغني عن الاستشارة الطبية المباشرة. في حالة الأعراض الشديدة أو الطوارئ، يرجى التوجه لأقرب مستشفى فوراً.`;
-
-    return response;
-  };
-
-  /**
-   * Handles sending consultation message
-   */
-  const handleSendMessage = () => {
-    if (!userInput.trim()) return;
-
-    const newUserMessage = {
-      id: consultationMessages.length + 1,
-      type: 'user',
-      text: userInput.trim(),
-      timestamp: new Date()
-    };
-
-    setConsultationMessages(prev => [...prev, newUserMessage]);
-    setUserInput('');
-    setIsTyping(true);
-
-    // Simulate AI thinking delay
-    setTimeout(() => {
-      const botResponse = generateConsultationResponse(newUserMessage.text);
-      const newBotMessage = {
-        id: consultationMessages.length + 2,
-        type: 'bot',
-        text: botResponse,
-        timestamp: new Date()
-      };
-
-      setConsultationMessages(prev => [...prev, newBotMessage]);
-      setIsTyping(false);
-    }, 1500);
-  };
-
-  /**
-   * Handles Enter key press in chat input
-   */
-  const handleKeyPress = (e) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSendMessage();
-    }
-  };
-
-  /**
-   * Resets consultation chat
-   */
-  const resetConsultation = () => {
-    setConsultationMessages([
-      {
-        id: 1,
-        type: 'bot',
-        text: 'مرحباً بك في خدمة الاستشارة الطبية الذكية! 👋\n\nأنا هنا لمساعدتك في تحديد التخصص الطبي المناسب لحالتك.\n\nيرجى وصف الأعراض التي تشعر بها بالتفصيل، وسأقوم بتوجيهك للتخصص الطبي المناسب.',
-        timestamp: new Date()
-      }
-    ]);
-  };
-
-  // Auto-scroll to bottom of chat
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: 'smooth' });
-  }, [consultationMessages]);
-
-  /**
-   * Opens modal dialog
-   */
-  const openModal = (type, title, message, onConfirm = null) => {
-    setModal({ isOpen: true, type, title, message, onConfirm });
-  };
-
-  /**
-   * Closes modal dialog
-   */
-  const closeModal = () => {
-    if (modal.onConfirm && modal.type === 'confirm') {
-      // User cancelled confirmation
-    }
-    setModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
-  };
-
-  /**
-   * Handles modal confirmation action
-   */
-  const handleModalConfirm = () => {
-    if (modal.onConfirm) {
-      modal.onConfirm();
-    }
-    closeModal();
-  };
-
-  /**
-   * ✅ UPDATED: Load patient data from Backend API
-   */
-  useEffect(() => {
-    const loadPatientData = async () => {
+    const loadData = async () => {
       setLoading(true);
-      
-      // Get current user from localStorage (set by authAPI.login)
       const currentUser = authAPI.getCurrentUser();
-      
-      // Security Check 1: User must be logged in
-      if (!currentUser) {
-        openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/'));
-        return;
-      }
-      
-      // Security Check 2: User must have patient role
-      const primaryRole = currentUser.roles && currentUser.roles[0];
-      if (primaryRole !== 'patient') {
-        openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمرضى فقط', () => navigate('/'));
-        return;
-      }
-      
-      setUser(currentUser);
-      
-      // Generate visits from patient data (currently empty, will be populated by doctor)
-      const realVisits = [];
-      setVisits(realVisits);
-      
-      setLoading(false);
+      if (!currentUser) { openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/')); return; }
+      if (currentUser.roles?.[0] !== 'patient') { openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمرضى فقط', () => navigate('/')); return; }
+      setUser(currentUser); setVisits([]); setLoading(false);
     };
-    
-    loadPatientData();
+    loadData();
   }, [navigate]);
 
-  /**
-   * Closes detailed view
-   */
-  const closeVisitDetails = () => {
-    setShowVisitDetails(false);
-    setSelectedVisit(null);
-  };
+  const handleLogout = () => openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', () => authAPI.logout());
+  const formatDate = (d) => d ? new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
+  const calculateAge = (d) => { if (!d) return null; const t = new Date(), b = new Date(d); let a = t.getFullYear() - b.getFullYear(); if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; return a; };
+  const calculateBMI = (h, w) => (h && w) ? (w / ((h/100) ** 2)).toFixed(1) : null;
+  const getBMICategory = (b) => !b ? null : b < 18.5 ? 'نقص الوزن' : b < 25 ? 'وزن طبيعي' : b < 30 ? 'وزن زائد' : 'سمنة';
+  const getBMICategoryClass = (b) => !b ? '' : b < 18.5 ? 'underweight' : b < 25 ? 'normal' : b < 30 ? 'overweight' : 'obese';
 
-  /**
-   * ✅ UPDATED: Handles secure logout with Backend API
-   */
-  const handleLogout = () => {
-    openModal(
-      'confirm',
-      'تأكيد تسجيل الخروج',
-      'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
-      () => {
-        // Use authAPI logout
-        authAPI.logout();
-        // Will redirect to login automatically
-      }
-    );
-  };
+  if (loading) return <div className="loading-container"><div className="loading-spinner"></div><p>جاري التحميل...</p></div>;
+  if (!user) return null;
 
-  /**
-   * Formats date for display
-   */
-  const formatDate = (dateString) => {
-    if (!dateString) return '-';
-    const date = new Date(dateString);
-    return date.toLocaleDateString('ar-EG', { 
-      year: 'numeric', 
-      month: 'long', 
-      day: 'numeric' 
-    });
-  };
-
-  /**
-   * Calculates age from date of birth
-   */
-  const calculateAge = (dateString) => {
-    if (!dateString) return null;
-    const today = new Date();
-    const birthDate = new Date(dateString);
-    let age = today.getFullYear() - birthDate.getFullYear();
-    const monthDiff = today.getMonth() - birthDate.getMonth();
-    if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birthDate.getDate())) {
-      age--;
-    }
-    return age;
-  };
-
-  /**
-   * Calculates BMI from height and weight
-   */
-  const calculateBMI = (height, weight) => {
-    if (!height || !weight) return null;
-    const heightInMeters = height / 100;
-    const bmi = weight / (heightInMeters * heightInMeters);
-    return bmi.toFixed(1);
-  };
-
-  /**
-   * Gets BMI category
-   */
-  const getBMICategory = (bmi) => {
-    if (!bmi) return null;
-    if (bmi < 18.5) return 'نقص الوزن';
-    if (bmi < 25) return 'وزن طبيعي';
-    if (bmi < 30) return 'وزن زائد';
-    return 'سمنة';
-  };
-
-  /**
-   * Gets BMI category class for styling
-   */
-  const getBMICategoryClass = (bmi) => {
-    if (!bmi) return '';
-    if (bmi < 18.5) return 'underweight';
-    if (bmi < 25) return 'normal';
-    if (bmi < 30) return 'overweight';
-    return 'obese';
-  };
-
-  /**
-   * Calculates health statistics
-   */
-  const getHealthStats = () => {
-    const totalVisits = visits.length;
-    const totalMedications = visits.reduce((acc, v) => 
-      acc + (v.prescribedMedications ? v.prescribedMedications.length : 0), 0
-    );
-    
-    return { totalVisits, totalMedications };
-  };
-
-  if (loading) {
-    return (
-      <div className="loading-container">
-        <div className="loading-spinner"></div>
-        <p>جاري التحميل...</p>
-      </div>
-    );
-  }
-
-  if (!user) {
-    return null;
-  }
-
-  const stats = getHealthStats();
   const age = calculateAge(user.dateOfBirth);
-  
-  // ✅ UPDATED: Access roleData.patient for patient-specific info
   const patientData = user.roleData?.patient || {};
   const bmi = calculateBMI(patientData.height, patientData.weight);
   const bmiCategory = getBMICategory(bmi);
@@ -497,751 +124,248 @@ const PatientDashboard = () => {
     <div className="patient-dashboard">
       <Navbar />
       
-      {/* Modal Component */}
       {modal.isOpen && (
         <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-container" onClick={(e) => e.stopPropagation()}>
+          <div className="modal-container" onClick={e => e.stopPropagation()}>
             <div className={`modal-header ${modal.type}`}>
-              {modal.type === 'success' && <div className="modal-icon success-icon">✓</div>}
-              {modal.type === 'error' && <div className="modal-icon error-icon">✕</div>}
-              {modal.type === 'confirm' && <div className="modal-icon confirm-icon">؟</div>}
-              <h2 className="modal-title">{modal.title}</h2>
+              <div className="modal-icon">{modal.type === 'success' ? '✓' : modal.type === 'error' ? '✕' : '؟'}</div>
+              <h2>{modal.title}</h2>
             </div>
-            <div className="modal-body">
-              <p className="modal-message">{modal.message}</p>
-            </div>
+            <div className="modal-body"><p>{modal.message}</p></div>
             <div className="modal-footer">
               {modal.type === 'confirm' ? (
-                <>
-                  <button className="modal-button secondary" onClick={closeModal}>
-                    إلغاء
-                  </button>
-                  <button className="modal-button primary" onClick={handleModalConfirm}>
-                    تأكيد
-                  </button>
-                </>
-              ) : (
-                <button 
-                  className="modal-button primary" 
-                  onClick={modal.onConfirm ? handleModalConfirm : closeModal}
-                >
-                  حسناً
-                </button>
-              )}
+                <><button className="modal-button secondary" onClick={closeModal}>إلغاء</button><button className="modal-button primary" onClick={handleModalConfirm}>تأكيد</button></>
+              ) : <button className="modal-button primary" onClick={modal.onConfirm ? handleModalConfirm : closeModal}>حسناً</button>}
             </div>
           </div>
         </div>
       )}
 
-      {/* Visit Details Modal */}
-      <VisitDetailsModal 
-        visit={selectedVisit}
-        isOpen={showVisitDetails}
-        onClose={closeVisitDetails}
-        formatDate={formatDate}
-      />
-
       <div className="dashboard-container">
-        {/* Welcome Header */}
         <div className="welcome-header">
           <div className="welcome-content">
             <h1>مرحباً {user.firstName} {user.lastName} 👋</h1>
             <p>لوحة تحكم المريض - Patient 360°</p>
-            {/* ✅ NEW: Show if user is a minor */}
-            {user.isMinor && user.childId && (
-              <p className="minor-badge">قاصر - معرف الطفل: {user.childId}</p>
-            )}
           </div>
-          <button className="logout-btn" onClick={handleLogout}>
-            تسجيل الخروج 🚪
-          </button>
+          <button className="logout-btn" onClick={handleLogout}>تسجيل الخروج 🚪</button>
         </div>
 
-        {/* Navigation Tabs */}
         <div className="dashboard-tabs">
-          <button 
-            className={`tab-btn ${activeSection === 'overview' ? 'active' : ''}`}
-            onClick={() => setActiveSection('overview')}
-          >
-            <span className="tab-icon">📊</span>
-            نظرة عامة
-          </button>
-          <button 
-            className={`tab-btn ${activeSection === 'visits' ? 'active' : ''}`}
-            onClick={() => setActiveSection('visits')}
-          >
-            <span className="tab-icon">📋</span>
-            سجل الزيارات
-          </button>
-          <button 
-            className={`tab-btn ${activeSection === 'consultation' ? 'active' : ''}`}
-            onClick={() => setActiveSection('consultation')}
-          >
-            <span className="tab-icon">🤖</span>
-            استشيرني
-          </button>
-          <button 
-            className={`tab-btn ${activeSection === 'medications' ? 'active' : ''}`}
-            onClick={() => setActiveSection('medications')}
-          >
-            <span className="tab-icon">💊</span>
-            تقويم الأدوية
-          </button>
+          {['overview', 'visits', 'consultation', 'medications'].map(section => (
+            <button key={section} className={`tab-btn ${activeSection === section ? 'active' : ''}`} onClick={() => setActiveSection(section)}>
+              <span className="tab-icon">{section === 'overview' ? '📊' : section === 'visits' ? '📋' : section === 'consultation' ? '🤖' : '💊'}</span>
+              {section === 'overview' ? 'نظرة عامة' : section === 'visits' ? 'سجل الزيارات' : section === 'consultation' ? 'استشيرني' : 'تقويم الأدوية'}
+            </button>
+          ))}
         </div>
 
-        {/* Overview Section */}
         {activeSection === 'overview' && (
           <div className="section-content">
-            {/* Profile Header Card */}
             <div className="profile-header-card">
               <div className="profile-avatar">
-                <div className="avatar-circle">
-                  <span className="avatar-icon">{user.gender === 'male' ? '👨' : '👩'}</span>
-                </div>
-                <div className="avatar-badge">
-                  <span className="badge-icon">✓</span>
-                </div>
+                <div className="avatar-circle"><span>{user.gender === 'male' ? '👨' : '👩'}</span></div>
+                <div className="avatar-badge"><span>✓</span></div>
               </div>
               <div className="profile-header-info">
-                <h1 className="profile-name">{user.firstName} {user.lastName}</h1>
-                <p className="profile-role">
-                  {user.isMinor ? 'مريض قاصر - Patient 360°' : 'مريض - Patient 360°'}
-                </p>
+                <h1>{user.firstName} {user.lastName}</h1>
+                <p className="profile-role">مريض - Patient 360°</p>
                 <div className="profile-meta-info">
-                  {age && (
-                    <div className="meta-item">
-                      <span className="meta-icon">🎂</span>
-                      <span className="meta-text">{age} سنة</span>
-                    </div>
-                  )}
-                  {user.gender && (
-                    <div className="meta-item">
-                      <span className="meta-icon">{user.gender === 'male' ? '♂️' : '♀️'}</span>
-                      <span className="meta-text">{user.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
-                    </div>
-                  )}
-                  {patientData.bloodType && (
-                    <div className="meta-item">
-                      <span className="meta-icon">🩸</span>
-                      <span className="meta-text">{patientData.bloodType}</span>
-                    </div>
-                  )}
-                </div>
-                <div className="profile-status">
-                  <span className="status-indicator active"></span>
-                  <span className="status-text">حساب نشط</span>
+                  {age && <div className="meta-item"><span>🎂</span><span>{age} سنة</span></div>}
+                  {user.gender && <div className="meta-item"><span>{user.gender === 'male' ? '♂️' : '♀️'}</span><span>{user.gender === 'male' ? 'ذكر' : 'أنثى'}</span></div>}
+                  {patientData.bloodType && <div className="meta-item"><span>🩸</span><span>{patientData.bloodType}</span></div>}
                 </div>
               </div>
             </div>
 
-            {/* Quick Stats */}
             <div className="quick-stats-grid">
-              <div className="quick-stat-card visits">
-                <div className="stat-icon-wrapper">
-                  <span className="stat-icon-large">📋</span>
-                </div>
-                <div className="stat-content">
-                  <h3 className="stat-number">{stats.totalVisits}</h3>
-                  <p className="stat-label">زيارة طبية</p>
-                </div>
-              </div>
-              
-              <div className="quick-stat-card medications">
-                <div className="stat-icon-wrapper">
-                  <span className="stat-icon-large">💊</span>
-                </div>
-                <div className="stat-content">
-                  <h3 className="stat-number">{stats.totalMedications}</h3>
-                  <p className="stat-label">دواء موصوف</p>
-                </div>
-              </div>
-              
-              {bmi && (
-                <div className={`quick-stat-card bmi ${bmiCategoryClass}`}>
-                  <div className="stat-icon-wrapper">
-                    <span className="stat-icon-large">⚖️</span>
-                  </div>
-                  <div className="stat-content">
-                    <h3 className="stat-number">{bmi}</h3>
-                    <p className="stat-label">مؤشر كتلة الجسم</p>
-                    <span className={`stat-badge ${bmiCategoryClass}`}>{bmiCategory}</span>
-                  </div>
-                </div>
-              )}
-              
-              {patientData.allergies && patientData.allergies.length > 0 && (
-                <div className="quick-stat-card allergies">
-                  <div className="stat-icon-wrapper">
-                    <span className="stat-icon-large">⚠️</span>
-                  </div>
-                  <div className="stat-content">
-                    <h3 className="stat-number">{patientData.allergies.length}</h3>
-                    <p className="stat-label">حساسية مسجلة</p>
-                  </div>
-                </div>
-              )}
+              <div className="quick-stat-card visits"><div className="stat-icon-wrapper"><span>📋</span></div><div className="stat-content"><h3>{visits.length}</h3><p>زيارة طبية</p></div></div>
+              {bmi && <div className={`quick-stat-card bmi ${bmiCategoryClass}`}><div className="stat-icon-wrapper"><span>⚖️</span></div><div className="stat-content"><h3>{bmi}</h3><p>مؤشر كتلة الجسم</p><span className={`stat-badge ${bmiCategoryClass}`}>{bmiCategory}</span></div></div>}
             </div>
 
-            {/* Personal Information Section */}
             <div className="data-section">
-              <div className="section-header">
-                <div className="section-title-wrapper">
-                  <span className="section-icon">👤</span>
-                  <h2 className="section-title">المعلومات الشخصية</h2>
-                </div>
-              </div>
-              
+              <div className="section-header"><div className="section-title-wrapper"><span className="section-icon">👤</span><h2>المعلومات الشخصية</h2></div></div>
               <div className="info-cards-grid">
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle email">
-                      <span>✉️</span>
-                    </div>
-                    <h3>البريد الإلكتروني</h3>
-                  </div>
-                  <p className="card-value" dir="ltr">{user.email}</p>
-                  <span className="card-subtitle">للتواصل والإشعارات</span>
-                </div>
-
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle phone">
-                      <span>📱</span>
-                    </div>
-                    <h3>رقم الهاتف</h3>
-                  </div>
-                  <p className="card-value" dir="ltr">{user.phoneNumber || 'غير محدد'}</p>
-                  <span className="card-subtitle">للاتصال المباشر</span>
-                </div>
-
-                {/* ✅ UPDATED: Show nationalId or childId based on isMinor */}
-                {user.isMinor ? (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle id">
-                        <span>👶</span>
-                      </div>
-                      <h3>معرف الطفل</h3>
-                    </div>
-                    <p className="card-value">{user.childId || 'غير محدد'}</p>
-                    <span className="card-subtitle">المعرف الخاص</span>
-                  </div>
-                ) : (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle id">
-                        <span>🆔</span>
-                      </div>
-                      <h3>رقم الهوية الوطنية</h3>
-                    </div>
-                    <p className="card-value">{user.nationalId || 'غير محدد'}</p>
-                    <span className="card-subtitle">الرقم الوطني</span>
-                  </div>
-                )}
-
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle birth">
-                      <span>🎂</span>
-                    </div>
-                    <h3>تاريخ الميلاد</h3>
-                  </div>
-                  <p className="card-value">{formatDate(user.dateOfBirth)}</p>
-                  <span className="card-subtitle">العمر: {age ? age + ' سنة' : 'غير محدد'}</span>
-                </div>
-
-                {user.gender && (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle gender">
-                        <span>{user.gender === 'male' ? '👨' : '👩'}</span>
-                      </div>
-                      <h3>الجنس</h3>
-                    </div>
-                    <p className="card-value">{user.gender === 'male' ? 'ذكر' : 'أنثى'}</p>
-                    <span className="card-subtitle">النوع</span>
-                  </div>
-                )}
-
-                {/* ✅ NEW: Address Field - Always show if available */}
-                {user.address && (
-                  <div className="info-display-card full-width">
-                    <div className="card-icon-header">
-                      <div className="icon-circle address">
-                        <span>📍</span>
-                      </div>
-                      <h3>العنوان</h3>
-                    </div>
-                    <p className="card-value">{user.address}</p>
-                    <span className="card-subtitle">محل الإقامة</span>
-                  </div>
-                )}
+                <div className="info-display-card"><div className="card-icon-header"><div className="icon-circle email"><span>✉️</span></div><h3>البريد الإلكتروني</h3></div><p className="card-value" dir="ltr">{user.email}</p></div>
+                <div className="info-display-card"><div className="card-icon-header"><div className="icon-circle phone"><span>📱</span></div><h3>رقم الهاتف</h3></div><p className="card-value" dir="ltr">{user.phoneNumber || 'غير محدد'}</p></div>
+                <div className="info-display-card"><div className="card-icon-header"><div className="icon-circle id"><span>🆔</span></div><h3>رقم الهوية</h3></div><p className="card-value">{user.nationalId || 'غير محدد'}</p></div>
+                <div className="info-display-card"><div className="card-icon-header"><div className="icon-circle birth"><span>🎂</span></div><h3>تاريخ الميلاد</h3></div><p className="card-value">{formatDate(user.dateOfBirth)}</p></div>
+                {user.address && <div className="info-display-card full-width"><div className="card-icon-header"><div className="icon-circle address"><span>📍</span></div><h3>العنوان</h3></div><p className="card-value">{user.address}</p></div>}
               </div>
             </div>
 
-            {/* Medical Information Section */}
-            <div className="data-section">
-              <div className="section-header">
-                <div className="section-title-wrapper">
-                  <span className="section-icon">🏥</span>
-                  <h2 className="section-title">المعلومات الطبية</h2>
-                </div>
-              </div>
-              
-              <div className="medical-info-grid">
-                {patientData.bloodType && (
-                  <div className="medical-card blood-type">
-                    <div className="medical-card-header">
-                      <div className="medical-icon">🩸</div>
-                      <h3>فصيلة الدم</h3>
-                    </div>
-                    <div className="medical-value-large">{patientData.bloodType}</div>
-                    <div className="medical-footer">مهم في حالات الطوارئ</div>
-                  </div>
-                )}
-
-                {patientData.height && (
-                  <div className="medical-card height">
-                    <div className="medical-card-header">
-                      <div className="medical-icon">📏</div>
-                      <h3>الطول</h3>
-                    </div>
-                    <div className="medical-value-large">{patientData.height}</div>
-                    <div className="medical-unit">سم</div>
-                  </div>
-                )}
-
-                {patientData.weight && (
-                  <div className="medical-card weight">
-                    <div className="medical-card-header">
-                      <div className="medical-icon">⚖️</div>
-                      <h3>الوزن</h3>
-                    </div>
-                    <div className="medical-value-large">{patientData.weight}</div>
-                    <div className="medical-unit">كجم</div>
-                  </div>
-                )}
-
-                {bmi && (
-                  <div className={`medical-card bmi-card ${bmiCategoryClass}`}>
-                    <div className="medical-card-header">
-                      <div className="medical-icon">📊</div>
-                      <h3>مؤشر كتلة الجسم</h3>
-                    </div>
-                    <div className="medical-value-large">{bmi}</div>
-                    <div className={`bmi-category-badge ${bmiCategoryClass}`}>{bmiCategory}</div>
-                  </div>
-                )}
-
-                {patientData.smokingStatus && (
-                  <div className="medical-card smoking">
-                    <div className="medical-card-header">
-                      <div className="medical-icon">🚭</div>
-                      <h3>حالة التدخين</h3>
-                    </div>
-                    <div className="smoking-status">
-                      {patientData.smokingStatus === 'non-smoker' && 'غير مدخن ✅'}
-                      {patientData.smokingStatus === 'former smoker' && 'مدخن سابق ⚠️'}
-                      {patientData.smokingStatus === 'current smoker' && 'مدخن حالي 🚬'}
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* ✅ ENHANCED: Health History Section - Now always visible if any data exists */}
-            <div className="data-section">
-              <div className="section-header">
-                <div className="section-title-wrapper">
-                  <span className="section-icon">📜</span>
-                  <h2 className="section-title">السجل الصحي</h2>
-                </div>
-              </div>
-              
-              <div className="health-history-grid">
-                {/* Allergies Card */}
-                <div className="history-card allergies-card">
-                  <div className="history-header">
-                    <div className="history-icon">⚠️</div>
-                    <h3>الحساسية</h3>
-                    <span className="count-badge">
-                      {patientData.allergies?.length || 0}
-                    </span>
-                  </div>
-                  {patientData.allergies && patientData.allergies.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.allergies.map((allergy, index) => (
-                        <li key={index} className="history-item">
-                          <span className="item-bullet">•</span>
-                          <span className="item-text">{allergy}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message">
-                      <span className="no-data-icon">✓</span>
-                      <p>لا توجد حساسية مسجلة</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Chronic Diseases Card */}
-                <div className="history-card diseases-card">
-                  <div className="history-header">
-                    <div className="history-icon">🏥</div>
-                    <h3>الأمراض المزمنة</h3>
-                    <span className="count-badge">
-                      {patientData.chronicDiseases?.length || 0}
-                    </span>
-                  </div>
-                  {patientData.chronicDiseases && patientData.chronicDiseases.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.chronicDiseases.map((disease, index) => (
-                        <li key={index} className="history-item">
-                          <span className="item-bullet">•</span>
-                          <span className="item-text">{disease}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message">
-                      <span className="no-data-icon">✓</span>
-                      <p>لا توجد أمراض مزمنة مسجلة</p>
-                    </div>
-                  )}
-                </div>
-
-                {/* Family History Card */}
-                <div className="history-card family-card">
-                  <div className="history-header">
-                    <div className="history-icon">👨‍👩‍👧‍👦</div>
-                    <h3>التاريخ العائلي المرضي</h3>
-                    <span className="count-badge">
-                      {patientData.familyHistory?.length || 0}
-                    </span>
-                  </div>
-                  {patientData.familyHistory && patientData.familyHistory.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.familyHistory.map((history, index) => (
-                        <li key={index} className="history-item">
-                          <span className="item-bullet">•</span>
-                          <span className="item-text">{history}</span>
-                        </li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message">
-                      <span className="no-data-icon">✓</span>
-                      <p>لا يوجد تاريخ عائلي مرضي مسجل</p>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Emergency Contact Section */}
-            {patientData.emergencyContact && (
+            {(patientData.bloodType || patientData.height || patientData.weight) && (
               <div className="data-section">
-                <div className="section-header">
-                  <div className="section-title-wrapper">
-                    <span className="section-icon">🚨</span>
-                    <h2 className="section-title">جهة الاتصال في حالات الطوارئ</h2>
-                  </div>
-                </div>
-                
-                <div className="emergency-contact-card">
-                  <div className="emergency-header">
-                    <div className="emergency-icon-large">📞</div>
-                    <div className="emergency-info">
-                      <h3 className="emergency-name">{patientData.emergencyContact.name}</h3>
-                      <p className="emergency-relationship">{patientData.emergencyContact.relationship}</p>
-                    </div>
-                  </div>
-                  <div className="emergency-phone">
-                    <span className="phone-icon">📱</span>
-                    <span className="phone-number" dir="ltr">{patientData.emergencyContact.phoneNumber}</span>
-                  </div>
-                  <div className="emergency-note">
-                    <span className="note-icon">ℹ️</span>
-                    <span className="note-text">سيتم التواصل مع هذا الشخص في حالات الطوارئ الطبية</span>
-                  </div>
+                <div className="section-header"><div className="section-title-wrapper"><span className="section-icon">🏥</span><h2>المعلومات الطبية</h2></div></div>
+                <div className="medical-info-grid">
+                  {patientData.bloodType && <div className="medical-card"><div className="medical-card-header"><div className="medical-icon">🩸</div><h3>فصيلة الدم</h3></div><div className="medical-value-large">{patientData.bloodType}</div></div>}
+                  {patientData.height && <div className="medical-card"><div className="medical-card-header"><div className="medical-icon">📏</div><h3>الطول</h3></div><div className="medical-value-large">{patientData.height}</div><div className="medical-unit">سم</div></div>}
+                  {patientData.weight && <div className="medical-card"><div className="medical-card-header"><div className="medical-icon">⚖️</div><h3>الوزن</h3></div><div className="medical-value-large">{patientData.weight}</div><div className="medical-unit">كجم</div></div>}
                 </div>
               </div>
             )}
 
-            {/* Welcome Message Card */}
-            <div className="welcome-message-card">
-              <div className="message-icon">💚</div>
-              <div className="message-content">
-                <h3>مرحباً بك في Patient 360°</h3>
-                <p>
-                  نحن سعداء بوجودك معنا يا {user.firstName}. تم تسجيل جميع بياناتك بنجاح في النظام،
-                  ويمكنك الآن الاستفادة من جميع خدماتنا الطبية المتقدمة.
-                </p>
-                <p>
-                  للوصول إلى سجل زياراتك الطبية ومتابعة أدويتك، استخدم التبويبات في الأعلى.
-                  يمكنك أيضاً استخدام خدمة <strong>"استشيرني"</strong> للحصول على توصيات حول التخصص الطبي المناسب.
-                </p>
+            <div className="data-section">
+              <div className="section-header"><div className="section-title-wrapper"><span className="section-icon">📜</span><h2>السجل الصحي</h2></div></div>
+              <div className="health-history-grid">
+                <div className="history-card allergies-card">
+                  <div className="history-header"><div className="history-icon">⚠️</div><h3>الحساسية</h3><span className="count-badge">{patientData.allergies?.length || 0}</span></div>
+                  {patientData.allergies?.length > 0 ? <ul className="history-list">{patientData.allergies.map((a, i) => <li key={i} className="history-item"><span>•</span><span>{a}</span></li>)}</ul> : <div className="no-data-message"><span>✓</span><p>لا توجد حساسية مسجلة</p></div>}
+                </div>
+                <div className="history-card diseases-card">
+                  <div className="history-header"><div className="history-icon">🏥</div><h3>الأمراض المزمنة</h3><span className="count-badge">{patientData.chronicDiseases?.length || 0}</span></div>
+                  {patientData.chronicDiseases?.length > 0 ? <ul className="history-list">{patientData.chronicDiseases.map((d, i) => <li key={i} className="history-item"><span>•</span><span>{d}</span></li>)}</ul> : <div className="no-data-message"><span>✓</span><p>لا توجد أمراض مزمنة</p></div>}
+                </div>
+                <div className="history-card family-card">
+                  <div className="history-header"><div className="history-icon">👨‍👩‍👧‍👦</div><h3>التاريخ العائلي</h3><span className="count-badge">{patientData.familyHistory?.length || 0}</span></div>
+                  {patientData.familyHistory?.length > 0 ? <ul className="history-list">{patientData.familyHistory.map((h, i) => <li key={i} className="history-item"><span>•</span><span>{h}</span></li>)}</ul> : <div className="no-data-message"><span>✓</span><p>لا يوجد تاريخ عائلي مسجل</p></div>}
+                </div>
               </div>
             </div>
           </div>
         )}
 
-        {/* Visits Section */}
         {activeSection === 'visits' && (
           <div className="section-content">
             <div className="card">
-              <div className="card-header">
-                <h2>سجل الزيارات الطبية</h2>
-                <p className="card-subtitle">لم يتم تسجيل أي زيارات طبية بعد</p>
-              </div>
-              <div className="empty-state">
-                <div className="empty-icon">📋</div>
-                <h3>لا توجد زيارات</h3>
-                <p>سيتم عرض زياراتك الطبية هنا بعد مراجعة الطبيب</p>
-              </div>
+              <div className="card-header"><h2>سجل الزيارات الطبية</h2></div>
+              <div className="empty-state"><div className="empty-icon">📋</div><h3>لا توجد زيارات</h3><p>سيتم عرض زياراتك الطبية هنا بعد مراجعة الطبيب</p></div>
             </div>
           </div>
         )}
 
-        {/* ✅ NEW: AI Consultation Section - "استشيرني" */}
         {activeSection === 'consultation' && (
           <div className="section-content">
-            <div className="consultation-container">
-              {/* Consultation Header */}
-              <div className="consultation-header">
-                <div className="consultation-title-wrapper">
-                  <span className="consultation-icon">🤖</span>
-                  <div className="consultation-title-content">
-                    <h2>استشيرني - المساعد الطبي الذكي</h2>
-                    <p>صف لي أعراضك وسأساعدك في تحديد التخصص الطبي المناسب</p>
+            <div className="consultation-main-container">
+              <div className="consultation-page-header">
+                <div className="consultation-header-content">
+                  <div className="consultation-icon-box"><span className="ai-icon">🤖</span><div className="ai-pulse-ring"></div></div>
+                  <div className="consultation-header-text"><h1>استشيرني</h1><p>AI Medical Consultation Assistant</p></div>
+                </div>
+                <div className="consultation-header-badge"><span>🏥</span><span>{MEDICAL_SPECIALIZATIONS.length} تخصص طبي</span></div>
+              </div>
+
+              {!AI_SERVICE_CONFIG.isEnabled && (
+                <div className="service-development-section">
+                  <div className="development-banner">
+                    <div className="dev-animation-container">
+                      <div className="dev-icon">🚧</div>
+                      <div className="dev-circles"><span></span><span></span><span></span></div>
+                    </div>
+                    <div className="dev-content">
+                      <h2>الخدمة قيد التطوير</h2>
+                      <p className="dev-subtitle">Service Under Development</p>
+                      <p className="dev-description">نعمل حالياً على ربط نموذج الذكاء الاصطناعي بهذه الخدمة. سيتم تفعيلها قريباً لمساعدتك في تحديد التخصص الطبي المناسب.</p>
+                      <div className="dev-features">
+                        <div className="dev-feature"><span>✨</span><span>تحليل الأعراض بالذكاء الاصطناعي</span></div>
+                        <div className="dev-feature"><span>🎯</span><span>توصيات دقيقة للتخصص الطبي</span></div>
+                        <div className="dev-feature"><span>⚡</span><span>نتائج فورية وموثوقة</span></div>
+                      </div>
+                    </div>
+                  </div>
+                  <div className="input-preview-disabled">
+                    <div className="preview-header"><span>💬</span><h3>Describe Your Symptoms</h3><span className="coming-soon-tag">قريباً</span></div>
+                    <div className="preview-input-area">
+                      <textarea disabled placeholder="Enter your symptoms in English... (Coming Soon)"></textarea>
+                      <button disabled><span>🔍</span><span>Analyze</span></button>
+                    </div>
                   </div>
                 </div>
-                <button className="reset-chat-btn" onClick={resetConsultation}>
-                  <span>🔄</span>
-                  محادثة جديدة
-                </button>
-              </div>
+              )}
 
-              {/* Disclaimer Banner */}
-              <div className="consultation-disclaimer">
-                <span className="disclaimer-icon">⚠️</span>
-                <p>
-                  <strong>تنويه هام:</strong> هذه الخدمة استرشادية فقط ولا تغني عن الاستشارة الطبية المباشرة. 
-                  في حالة الأعراض الشديدة أو الطوارئ، يرجى التوجه لأقرب مستشفى فوراً.
-                </p>
-              </div>
-
-              {/* Chat Container */}
-              <div className="chat-container">
-                <div className="chat-messages">
-                  {consultationMessages.map((message) => (
-                    <div 
-                      key={message.id} 
-                      className={`chat-message ${message.type}`}
-                    >
-                      {message.type === 'bot' && (
-                        <div className="message-avatar bot-avatar">
-                          <span>🤖</span>
-                        </div>
-                      )}
-                      <div className="message-content">
-                        <div className="message-bubble">
-                          {message.text.split('\n').map((line, index) => (
-                            <React.Fragment key={index}>
-                              {line.startsWith('**') && line.endsWith('**') ? (
-                                <strong>{line.replace(/\*\*/g, '')}</strong>
-                              ) : line.startsWith('•') ? (
-                                <span className="bullet-point">{line}</span>
-                              ) : (
-                                line
-                              )}
-                              {index < message.text.split('\n').length - 1 && <br />}
-                            </React.Fragment>
-                          ))}
-                        </div>
-                        <span className="message-time">
-                          {message.timestamp.toLocaleTimeString('ar-EG', { 
-                            hour: '2-digit', 
-                            minute: '2-digit' 
-                          })}
-                        </span>
+              {AI_SERVICE_CONFIG.isEnabled && (
+                <>
+                  <div className="consultation-disclaimer-banner">
+                    <span>⚠️</span>
+                    <p><strong>Important:</strong> This service provides guidance only and does not replace professional medical consultation.</p>
+                  </div>
+                  <div className="symptoms-input-card">
+                    <div className="input-card-header"><span>💬</span><div><h3>Describe Your Symptoms</h3><p>صف أعراضك باللغة الإنجليزية</p></div></div>
+                    <div className="input-card-body">
+                      <textarea className="symptoms-textarea-main" placeholder="Enter your symptoms in English..." value={symptoms} onChange={e => setSymptoms(e.target.value)} rows={4} disabled={isAnalyzing} dir="ltr" />
+                      <div className="input-actions">
+                        {consultationResult && <button className="reset-btn" onClick={resetConsultation}><span>🔄</span><span>استشارة جديدة</span></button>}
+                        <button className="analyze-main-btn" onClick={handleAnalyzeSymptoms} disabled={!symptoms.trim() || isAnalyzing}>
+                          {isAnalyzing ? <><span className="spinner"></span><span>Analyzing...</span></> : <><span>🔍</span><span>Analyze Symptoms</span></>}
+                        </button>
                       </div>
-                      {message.type === 'user' && (
-                        <div className="message-avatar user-avatar">
-                          <span>{user.gender === 'male' ? '👨' : '👩'}</span>
-                        </div>
-                      )}
                     </div>
-                  ))}
-                  
-                  {/* Typing Indicator */}
-                  {isTyping && (
-                    <div className="chat-message bot">
-                      <div className="message-avatar bot-avatar">
-                        <span>🤖</span>
-                      </div>
-                      <div className="message-content">
-                        <div className="typing-indicator">
-                          <span></span>
-                          <span></span>
-                          <span></span>
+                    {consultationError && <div className="consultation-error-message"><span>❌</span><p>{consultationError === 'SERVICE_NOT_AVAILABLE' ? 'Service unavailable.' : 'An error occurred.'}</p></div>}
+                  </div>
+                  {consultationResult && (
+                    <div className="consultation-result-card" ref={resultRef}>
+                      <div className="result-card-header"><div className="result-success-icon">✅</div><div><h3>Recommended Specialist</h3><p>التخصص الطبي الموصى به</p></div></div>
+                      <div className="result-card-body">
+                        <div className="result-specialization-card" style={{ borderColor: consultationResult.specialization.color }}>
+                          <div className="result-spec-icon" style={{ background: `${consultationResult.specialization.color}20` }}><span>{consultationResult.specialization.icon}</span></div>
+                          <div className="result-spec-info">
+                            <h4>{consultationResult.specialization.nameAr}</h4>
+                            <p className="result-spec-en">{consultationResult.specialization.nameEn}</p>
+                            <p className="result-spec-desc">{consultationResult.specialization.description}</p>
+                          </div>
                         </div>
+                        {consultationResult.confidence && (
+                          <div className="confidence-display">
+                            <span>Confidence:</span>
+                            <div className="conf-bar-container"><div className="conf-bar-fill" style={{ width: `${consultationResult.confidence * 100}%`, background: consultationResult.specialization.color }}></div></div>
+                            <span>{Math.round(consultationResult.confidence * 100)}%</span>
+                          </div>
+                        )}
+                        <div className="result-symptoms-ref"><span>💡</span><div><strong>Based on:</strong><p>"{consultationResult.inputSymptoms}"</p></div></div>
                       </div>
                     </div>
                   )}
-                  
-                  <div ref={chatEndRef} />
-                </div>
+                </>
+              )}
 
-                {/* Chat Input */}
-                <div className="chat-input-container">
-                  <div className="chat-input-wrapper">
-                    <textarea
-                      className="chat-input"
-                      placeholder="اكتب الأعراض التي تشعر بها هنا... (مثال: أشعر بألم في أسناني)"
-                      value={userInput}
-                      onChange={(e) => setUserInput(e.target.value)}
-                      onKeyPress={handleKeyPress}
-                      rows={1}
-                      disabled={isTyping}
-                    />
-                    <button 
-                      className="send-message-btn"
-                      onClick={handleSendMessage}
-                      disabled={!userInput.trim() || isTyping}
-                    >
-                      <span>إرسال</span>
-                      <span className="send-icon">📤</span>
-                    </button>
-                  </div>
-                  <p className="input-hint">
-                    اضغط Enter للإرسال أو Shift+Enter لسطر جديد
-                  </p>
+              <div className="all-specializations-section">
+                <div className="specializations-section-header">
+                  <div className="spec-section-title"><span>🏥</span><div><h2>التخصصات الطبية المتاحة</h2><p>All Available Medical Specializations</p></div></div>
+                  <div className="spec-count-badge"><span className="count-num">{MEDICAL_SPECIALIZATIONS.length}</span><span>تخصص</span></div>
                 </div>
-              </div>
-
-              {/* Quick Symptom Suggestions */}
-              <div className="quick-symptoms">
-                <h4>أمثلة على الأعراض:</h4>
-                <div className="symptom-tags">
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('أشعر بألم شديد في أسناني')}
-                  >
-                    🦷 ألم في الأسنان
-                  </button>
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('لدي صداع شديد ودوخة')}
-                  >
-                    🧠 صداع ودوخة
-                  </button>
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('أعاني من ألم في المعدة وغثيان')}
-                  >
-                    🫁 ألم المعدة
-                  </button>
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('لدي طفح جلدي وحكة')}
-                  >
-                    🧴 مشاكل جلدية
-                  </button>
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('أشعر بضيق في التنفس وألم في الصدر')}
-                  >
-                    ❤️ مشاكل القلب
-                  </button>
-                  <button 
-                    className="symptom-tag"
-                    onClick={() => setUserInput('أعاني من ألم في المفاصل والظهر')}
-                  >
-                    🦴 ألم العظام
-                  </button>
-                </div>
-              </div>
-
-              {/* Available Specialties Info */}
-              <div className="specialties-info">
-                <h4>التخصصات المتاحة:</h4>
-                <div className="specialties-grid">
-                  {Object.values(medicalSpecialties).slice(0, 8).map((spec, index) => (
-                    <div key={index} className="specialty-chip">
-                      <span className="specialty-icon">{spec.icon}</span>
-                      <span className="specialty-name">{spec.specialty}</span>
+                <div className="specializations-elegant-grid">
+                  {MEDICAL_SPECIALIZATIONS.map((spec, i) => (
+                    <div key={spec.id} className="spec-elegant-card" style={{ '--spec-color': spec.color, '--delay': `${i * 0.03}s` }}>
+                      <div className="spec-card-top-accent" style={{ background: spec.color }}></div>
+                      <div className="spec-card-content">
+                        <div className="spec-icon-wrapper" style={{ background: `${spec.color}15` }}><span>{spec.icon}</span></div>
+                        <div className="spec-text-content"><h4>{spec.nameAr}</h4><p>{spec.nameEn}</p></div>
+                      </div>
+                      <div className="spec-hover-description"><p>{spec.description}</p></div>
                     </div>
                   ))}
                 </div>
               </div>
+
+              <div className="how-service-works">
+                <div className="how-works-header"><span>📖</span><div><h3>كيف تعمل الخدمة؟</h3><p>How does it work?</p></div></div>
+                <div className="how-steps-container">
+                  <div className="how-step-item"><div className="step-num-circle"><span>1</span></div><div className="step-info"><h4>Describe Symptoms</h4><p>وصف الأعراض</p></div></div>
+                  <div className="step-arrow">→</div>
+                  <div className="how-step-item"><div className="step-num-circle"><span>2</span></div><div className="step-info"><h4>AI Analysis</h4><p>تحليل الذكاء الاصطناعي</p></div></div>
+                  <div className="step-arrow">→</div>
+                  <div className="how-step-item"><div className="step-num-circle"><span>3</span></div><div className="step-info"><h4>Get Recommendation</h4><p>الحصول على التوصية</p></div></div>
+                </div>
+              </div>
+
+              <div className="important-notice-box">
+                <div className="notice-icon-wrap">⚠️</div>
+                <div className="notice-content">
+                  <h4>تنبيه هام / Important Notice</h4>
+                  <p>هذه الخدمة استرشادية فقط ولا تغني عن الاستشارة الطبية المباشرة. في حالة الطوارئ، توجه لأقرب مستشفى فوراً.</p>
+                </div>
+              </div>
             </div>
           </div>
         )}
 
-        {/* Medications Section */}
         {activeSection === 'medications' && (
           <div className="section-content">
             <div className="card">
-              <div className="card-header">
-                <h2>💊 تقويم الأدوية</h2>
-                <p className="card-subtitle">لم يتم وصف أي أدوية بعد</p>
-              </div>
-              <div className="empty-state">
-                <div className="empty-icon">💊</div>
-                <h3>لا توجد أدوية</h3>
-                <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
-              </div>
+              <div className="card-header"><h2>💊 تقويم الأدوية</h2></div>
+              <div className="empty-state"><div className="empty-icon">💊</div><h3>لا توجد أدوية</h3><p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p></div>
             </div>
           </div>
         )}
-      </div>
-    </div>
-  );
-};
-
-/**
- * Visit Details Modal Component
- */
-const VisitDetailsModal = ({ visit, isOpen, onClose, formatDate }) => {
-  if (!isOpen || !visit) return null;
-
-  return (
-    <div className="visit-details-modal-overlay" onClick={onClose}>
-      <div className="visit-details-modal" onClick={(e) => e.stopPropagation()}>
-        <div className="modal-header-visit">
-          <div className="header-content">
-            <h2>📋 تفاصيل الزيارة الطبية</h2>
-            <p className="visit-date-header">{formatDate(visit.visitDate)} - {visit.visitTime}</p>
-          </div>
-          <button className="close-btn-visit" onClick={onClose}>✕</button>
-        </div>
-
-        <div className="modal-body-visit">
-          <div className="detail-card">
-            <div className="card-header-detail">
-              <span className="card-icon">👨‍⚕️</span>
-              <h3>معلومات الزيارة</h3>
-            </div>
-            <div className="info-grid">
-              <div className="info-item">
-                <span className="info-label">الطبيب:</span>
-                <span className="info-value">{visit.doctorName}</span>
-              </div>
-              <div className="info-item">
-                <span className="info-label">التشخيص:</span>
-                <span className="info-value">{visit.diagnosis}</span>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div className="modal-footer-visit">
-          <button className="close-button-visit" onClick={onClose}>
-            إغلاق
-          </button>
-        </div>
       </div>
     </div>
   );
