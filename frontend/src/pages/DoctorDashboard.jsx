@@ -199,7 +199,7 @@ const DoctorDashboard = () => {
   // PATIENT SEARCH WITH PARENT-CHILD SYSTEM
   // ═══════════════════════════════════════════════════════════════
 
-  const handleSearchPatient = async () => {
+const handleSearchPatient = async () => {
     if (!searchId.trim()) {
       setSearchError('الرجاء إدخال الرقم الوطني للمريض');
       return;
@@ -213,6 +213,8 @@ const DoctorDashboard = () => {
     try {
       const token = localStorage.getItem('token');
       
+      console.log('🔍 Searching for patient:', searchId);
+      
       // Search for patient by national ID
       const response = await fetch(`http://localhost:5000/api/doctor/search/${searchId}`, {
         headers: { 'Authorization': `Bearer ${token}` }
@@ -220,43 +222,19 @@ const DoctorDashboard = () => {
       
       const data = await response.json();
       
+      console.log('📥 Search response:', data);
+      
       if (!response.ok || !data.success) {
         setSearchError(data.message || 'لم يتم العثور على المريض');
         setSearchLoading(false);
         return;
       }
       
-      // Check if this person has children registered under their ID
-      const childrenResponse = await fetch(`http://localhost:5000/api/doctor/children/${searchId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      const childrenData = await childrenResponse.json();
-      
-      if (childrenResponse.ok && childrenData.success && childrenData.children?.length > 0) {
-        // Parent has children - show family selection
-        const allFamilyMembers = [
-          {
-            ...data.patient,
-            isParent: true,
-            displayName: `${data.patient.firstName} ${data.patient.lastName} (صاحب الهوية)`
-          },
-          ...childrenData.children.map(child => ({
-            ...child,
-            isParent: false,
-            displayName: `${child.firstName} ${child.lastName} (${calculateAge(child.dateOfBirth)} سنة)`
-          }))
-        ];
-        
-        setFamilyMembers(allFamilyMembers);
-        setShowFamilySelection(true);
-      } else {
-        // No children - directly select this patient
-        await selectPatient(data.patient);
-      }
+      // Directly select this patient (no children check for now)
+      await selectPatient(data.patient);
       
     } catch (error) {
-      console.error('Error:', error);
+      console.error('❌ Search error:', error);
       setSearchError('حدث خطأ في البحث عن المريض');
     } finally {
       setSearchLoading(false);
@@ -276,17 +254,28 @@ const DoctorDashboard = () => {
     // Load patient's complete medical history from all doctors
     try {
       const token = localStorage.getItem('token');
-      const patientId = patient.nationalId || patient.childId;
+      const nationalId = patient.nationalId || patient.childId;
       
-      const historyResponse = await fetch(`http://localhost:5000/api/doctor/patient-history/${patientId}`, {
+      console.log('📋 Loading patient history for:', nationalId);
+      
+      const historyResponse = await fetch(`http://localhost:5000/api/doctor/patient/${nationalId}/visits`, {
         headers: { 'Authorization': `Bearer ${token}` }
       });
       
+      console.log('📥 History response status:', historyResponse.status);
+      
       if (historyResponse.ok) {
         const historyData = await historyResponse.json();
+        console.log('📥 History data:', historyData);
+        
         if (historyData.success) {
           setPatientHistory(historyData.visits || []);
+        } else {
+          setPatientHistory([]);
         }
+      } else {
+        console.error('Failed to load history');
+        setPatientHistory([]);
       }
     } catch (error) {
       console.error('Error loading patient history:', error);
@@ -427,6 +416,10 @@ const DoctorDashboard = () => {
   // SAVE VISIT DATA
   // ═══════════════════════════════════════════════════════════════
 
+// ═══════════════════════════════════════════════════════════════
+  // SAVE VISIT DATA - FIXED VERSION
+  // ═══════════════════════════════════════════════════════════════
+
   const handleSaveVisit = async () => {
     if (!selectedPatient) {
       openModal('error', 'خطأ', 'يجب اختيار مريض أولاً');
@@ -438,33 +431,30 @@ const DoctorDashboard = () => {
       return;
     }
     
+    if (!diagnosis.trim()) {
+      openModal('error', 'خطأ', 'يرجى إدخال التشخيص');
+      return;
+    }
+    
     setSaving(true);
     
     try {
-      const ecgResults = (isCardiologist() && ecgFile) ? {
-        fileName: ecgFile.name,
-        uploadDate: new Date().toISOString(),
-        aiAnalysis: aiDiagnosis || null,
-        analyzedBy: aiDiagnosis ? 'AI Model' : 'Pending'
-      } : null;
-
       const visitData = {
-        visitDate: new Date().toISOString(),
-        chiefComplaint,
-        diagnosis,
-        vitalSigns,
-        doctorNotes,
-        ecgResults,
+        chiefComplaint: chiefComplaint.trim(),
+        diagnosis: diagnosis.trim(),
         prescribedMedications: medications,
-        doctorId: user._id || user.id,
-        doctorName: `${user.firstName} ${user.lastName}`,
-        specialization: user.specialization
+        doctorNotes: doctorNotes.trim() || '',
+        visitType: 'regular'
       };
       
       const token = localStorage.getItem('token');
-      const patientId = selectedPatient.nationalId || selectedPatient.childId;
+      const nationalId = selectedPatient.nationalId || selectedPatient.childId;
       
-      const response = await fetch(`http://localhost:5000/api/doctor/patient/${patientId}/visit`, {
+      console.log('📤 Sending visit data:', visitData);
+      console.log('🆔 Patient national ID:', nationalId);
+      console.log('🔗 API URL:', `http://localhost:5000/api/doctor/patient/${nationalId}/visit`);
+      
+      const response = await fetch(`http://localhost:5000/api/doctor/patient/${nationalId}/visit`, {
         method: 'POST',
         headers: {
           'Authorization': `Bearer ${token}`,
@@ -475,19 +465,26 @@ const DoctorDashboard = () => {
       
       const data = await response.json();
       
+      console.log('📥 Response status:', response.status);
+      console.log('📥 Response data:', data);
+      
       if (response.ok && data.success) {
         openModal('success', 'تم الحفظ', 'تم حفظ بيانات الزيارة بنجاح ✅');
         
         // Refresh patient history
-        const historyResponse = await fetch(`http://localhost:5000/api/doctor/patient-history/${patientId}`, {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        if (historyResponse.ok) {
-          const historyData = await historyResponse.json();
-          if (historyData.success) {
-            setPatientHistory(historyData.visits || []);
+        try {
+          const historyResponse = await fetch(`http://localhost:5000/api/doctor/patient/${nationalId}/visits`, {
+            headers: { 'Authorization': `Bearer ${token}` }
+          });
+          
+          if (historyResponse.ok) {
+            const historyData = await historyResponse.json();
+            if (historyData.success) {
+              setPatientHistory(historyData.visits || []);
+            }
           }
+        } catch (err) {
+          console.error('Error refreshing history:', err);
         }
         
         // Reset form
@@ -499,8 +496,8 @@ const DoctorDashboard = () => {
       }
       
     } catch (error) {
-      console.error('Error saving visit:', error);
-      openModal('error', 'خطأ', 'حدث خطأ في حفظ البيانات');
+      console.error('❌ Error saving visit:', error);
+      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
     } finally {
       setSaving(false);
     }

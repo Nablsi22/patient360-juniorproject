@@ -1,9 +1,272 @@
-const visitService = require('../services/visitService');
+const Visit = require('../models/Visit');
+const Person = require('../models/Person');
+const Doctor = require('../models/Doctor');
+const Patient = require('../models/Patient');
+
+// ==========================================
+// DOCTOR FUNCTIONS
+// ==========================================
 
 /**
- * Visit Controller
- * Handles HTTP requests for visit operations
+ * @route   POST /api/doctor/patient/:nationalId/visit
+ * @desc    Create a new visit for a patient
+ * @access  Private (Doctor only)
  */
+exports.createVisit = async (req, res) => {
+  try {
+    const { nationalId } = req.params;
+    const {
+      chiefComplaint,
+      diagnosis,
+      prescribedMedications,
+      doctorNotes,
+      visitType
+    } = req.body;
+
+    // Find patient by national ID
+    const person = await Person.findOne({ nationalId }).lean();
+    if (!person) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على المريض'
+      });
+    }
+
+    // Get doctor ID from authenticated user
+    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على بيانات الطبيب'
+      });
+    }
+
+    // Create visit
+    const visit = await Visit.create({
+      patientId: person._id,
+      doctorId: doctor._id,
+      visitDate: new Date(),
+      visitType: visitType || 'regular',
+      status: 'completed',
+      chiefComplaint,
+      diagnosis,
+      prescribedMedications: prescribedMedications || [],
+      doctorNotes: doctorNotes || ''
+    });
+
+    // Populate patient and doctor info
+    await visit.populate([
+      { path: 'patientId', select: 'firstName lastName nationalId' },
+      { path: 'doctorId', select: 'specialization institution' }
+    ]);
+
+    res.status(201).json({
+      success: true,
+      message: 'تم حفظ الزيارة بنجاح',
+      visit
+    });
+
+  } catch (error) {
+    console.error('Error creating visit:', error);
+    
+    // Handle validation errors
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'خطأ في البيانات المدخلة',
+        errors
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء حفظ الزيارة'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/doctor/patient/:nationalId/visits
+ * @desc    Get all visits for a specific patient
+ * @access  Private (Doctor only)
+ */
+exports.getPatientVisitsByNationalId = async (req, res) => {
+  try {
+    const { nationalId } = req.params;
+
+    // Find patient
+    const person = await Person.findOne({ nationalId }).lean();
+    if (!person) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على المريض'
+      });
+    }
+
+    // Get visits
+    const visits = await Visit.find({ patientId: person._id })
+      .populate('doctorId', 'specialization institution')
+      .sort({ visitDate: -1 })
+      .lean();
+
+    res.json({
+      success: true,
+      count: visits.length,
+      visits
+    });
+
+  } catch (error) {
+    console.error('Error fetching patient visits:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء جلب الزيارات'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/doctor/visits
+ * @desc    Get all visits by this doctor
+ * @access  Private (Doctor only)
+ */
+exports.getDoctorVisits = async (req, res) => {
+  try {
+    // Get doctor
+    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
+    if (!doctor) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على بيانات الطبيب'
+      });
+    }
+
+    // Get visits
+    const visits = await Visit.find({ doctorId: doctor._id })
+      .populate('patientId', 'firstName lastName nationalId')
+      .sort({ visitDate: -1 })
+      .limit(50)
+      .lean();
+
+    res.json({
+      success: true,
+      count: visits.length,
+      visits
+    });
+
+  } catch (error) {
+    console.error('Error fetching doctor visits:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء جلب الزيارات'
+    });
+  }
+};
+
+/**
+ * @route   GET /api/doctor/visit/:visitId
+ * @desc    Get visit details
+ * @access  Private (Doctor only)
+ */
+exports.getVisitDetailsDoctor = async (req, res) => {
+  try {
+    const { visitId } = req.params;
+
+    const visit = await Visit.findById(visitId)
+      .populate('patientId', 'firstName lastName nationalId dateOfBirth gender')
+      .populate('doctorId', 'specialization institution')
+      .lean();
+
+    if (!visit) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على الزيارة'
+      });
+    }
+
+    res.json({
+      success: true,
+      visit
+    });
+
+  } catch (error) {
+    console.error('Error fetching visit details:', error);
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء جلب تفاصيل الزيارة'
+    });
+  }
+};
+
+/**
+ * @route   PUT /api/doctor/visit/:visitId
+ * @desc    Update visit
+ * @access  Private (Doctor only)
+ */
+exports.updateVisit = async (req, res) => {
+  try {
+    const { visitId } = req.params;
+    const {
+      chiefComplaint,
+      diagnosis,
+      prescribedMedications,
+      doctorNotes,
+      status
+    } = req.body;
+
+    // Find and update visit
+    const visit = await Visit.findByIdAndUpdate(
+      visitId,
+      {
+        $set: {
+          chiefComplaint,
+          diagnosis,
+          prescribedMedications,
+          doctorNotes,
+          status
+        }
+      },
+      { new: true, runValidators: true }
+    ).populate([
+      { path: 'patientId', select: 'firstName lastName nationalId' },
+      { path: 'doctorId', select: 'specialization institution' }
+    ]);
+
+    if (!visit) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على الزيارة'
+      });
+    }
+
+    res.json({
+      success: true,
+      message: 'تم تحديث الزيارة بنجاح',
+      visit
+    });
+
+  } catch (error) {
+    console.error('Error updating visit:', error);
+    
+    if (error.name === 'ValidationError') {
+      const errors = Object.values(error.errors).map(err => err.message);
+      return res.status(400).json({
+        success: false,
+        message: 'خطأ في البيانات المدخلة',
+        errors
+      });
+    }
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء تحديث الزيارة'
+    });
+  }
+};
+
+// ==========================================
+// PATIENT FUNCTIONS
+// ==========================================
 
 /**
  * @route   GET /api/patient/visits
@@ -12,26 +275,64 @@ const visitService = require('../services/visitService');
  */
 exports.getVisits = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
-    const filters = {
-      startDate: req.query.startDate,
-      endDate: req.query.endDate,
-      doctorId: req.query.doctorId,
-      searchTerm: req.query.search,
-      status: req.query.status,
-      page: req.query.page || 1,
-      limit: req.query.limit || 50
-    };
-
-    const result = await visitService.getPatientVisits(patientId, filters);
-
-    if (!result.success) {
-      return res.status(400).json(result);
+    // Get patient ID from authenticated user
+    const patient = await Patient.findOne({ personId: req.user.personId }).lean();
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على بيانات المريض'
+      });
     }
 
-    res.status(200).json(result);
+    // Build query
+    const query = { patientId: req.user.personId };
+
+    // Apply filters if provided
+    if (req.query.status) {
+      query.status = req.query.status;
+    }
+
+    if (req.query.startDate || req.query.endDate) {
+      query.visitDate = {};
+      if (req.query.startDate) {
+        query.visitDate.$gte = new Date(req.query.startDate);
+      }
+      if (req.query.endDate) {
+        query.visitDate.$lte = new Date(req.query.endDate);
+      }
+    }
+
+    if (req.query.doctorId) {
+      query.doctorId = req.query.doctorId;
+    }
+
+    // Pagination
+    const page = parseInt(req.query.page) || 1;
+    const limit = parseInt(req.query.limit) || 50;
+    const skip = (page - 1) * limit;
+
+    // Get visits
+    const visits = await Visit.find(query)
+      .populate('doctorId', 'firstName lastName specialization institution')
+      .sort({ visitDate: -1 })
+      .skip(skip)
+      .limit(limit)
+      .lean();
+
+    // Get total count
+    const total = await Visit.countDocuments(query);
+
+    res.json({
+      success: true,
+      count: visits.length,
+      total,
+      page,
+      totalPages: Math.ceil(total / limit),
+      visits
+    });
+
   } catch (error) {
-    console.error('Error in getVisits controller:', error);
+    console.error('Error fetching visits:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء جلب الزيارات'
@@ -42,22 +343,34 @@ exports.getVisits = async (req, res) => {
 /**
  * @route   GET /api/patient/visits/:visitId
  * @desc    Get single visit details
- * @access  Private (Patient only - ownership verified in middleware)
+ * @access  Private (Patient only)
  */
 exports.getVisitDetails = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
-    const visitId = req.params.visitId;
+    const { visitId } = req.params;
 
-    const result = await visitService.getVisitById(visitId, patientId);
+    // Find visit and verify ownership
+    const visit = await Visit.findOne({
+      _id: visitId,
+      patientId: req.user.personId
+    })
+      .populate('doctorId', 'firstName lastName specialization institution phoneNumber')
+      .lean();
 
-    if (!result.success) {
-      return res.status(404).json(result);
+    if (!visit) {
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على الزيارة'
+      });
     }
 
-    res.status(200).json(result);
+    res.json({
+      success: true,
+      visit
+    });
+
   } catch (error) {
-    console.error('Error in getVisitDetails controller:', error);
+    console.error('Error fetching visit details:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء جلب تفاصيل الزيارة'
@@ -72,17 +385,28 @@ exports.getVisitDetails = async (req, res) => {
  */
 exports.getVisitStats = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    const stats = await Visit.aggregate([
+      { $match: { patientId: req.user.personId } },
+      {
+        $group: {
+          _id: '$status',
+          count: { $sum: 1 }
+        }
+      }
+    ]);
 
-    const result = await visitService.getVisitStats(patientId);
+    const total = await Visit.countDocuments({ patientId: req.user.personId });
 
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
+    res.json({
+      success: true,
+      stats: {
+        total,
+        byStatus: stats
+      }
+    });
 
-    res.status(200).json(result);
   } catch (error) {
-    console.error('Error in getVisitStats controller:', error);
+    console.error('Error fetching visit stats:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء حساب إحصائيات الزيارات'
@@ -97,20 +421,36 @@ exports.getVisitStats = async (req, res) => {
  */
 exports.getVisitsByDoctor = async (req, res) => {
   try {
-    const patientId = req.user.patientId;
+    const visits = await Visit.aggregate([
+      { $match: { patientId: req.user.personId } },
+      {
+        $group: {
+          _id: '$doctorId',
+          count: { $sum: 1 },
+          lastVisit: { $max: '$visitDate' }
+        }
+      },
+      { $sort: { count: -1 } }
+    ]);
 
-    const result = await visitService.getVisitsByDoctor(patientId);
+    // Populate doctor info
+    await Visit.populate(visits, {
+      path: '_id',
+      select: 'firstName lastName specialization institution'
+    });
 
-    if (!result.success) {
-      return res.status(400).json(result);
-    }
+    res.json({
+      success: true,
+      visits
+    });
 
-    res.status(200).json(result);
   } catch (error) {
-    console.error('Error in getVisitsByDoctor controller:', error);
+    console.error('Error fetching visits by doctor:', error);
     res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء تجميع الزيارات'
     });
   }
 };
+
+module.exports = exports;

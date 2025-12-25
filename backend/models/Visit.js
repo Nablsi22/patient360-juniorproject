@@ -1,113 +1,139 @@
 const mongoose = require('mongoose');
 
 const visitSchema = new mongoose.Schema({
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Basic Information
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   patientId: {
     type: mongoose.Schema.Types.ObjectId,
-    ref: 'Patient',
-    required: [true, 'معرف المريض مطلوب']
+    ref: 'Person',
+    required: [true, 'معرف المريض مطلوب'],
+    index: true
   },
+  
   doctorId: {
     type: mongoose.Schema.Types.ObjectId,
     ref: 'Doctor',
-    required: [true, 'معرف الطبيب مطلوب']
+    required: [true, 'معرف الطبيب مطلوب'],
+    index: true
   },
+  
   visitDate: {
     type: Date,
-    required: [true, 'تاريخ الزيارة مطلوب']
+    required: [true, 'تاريخ الزيارة مطلوب'],
+    default: Date.now,
+    index: true
   },
-  visitTime: {
+  
+  visitType: {
     type: String,
-    required: [true, 'وقت الزيارة مطلوب'],
-    match: [/^([01]?[0-9]|2[0-3]):[0-5][0-9] (AM|PM)$/, 'وقت الزيارة يجب أن يكون بصيغة HH:MM AM/PM']
+    enum: {
+      values: ['regular', 'emergency', 'followup'],
+      message: 'نوع الزيارة غير صالح'
+    },
+    default: 'regular',
+    index: true
   },
+  
   status: {
     type: String,
-    required: [true, 'حالة الزيارة مطلوبة'],
     enum: {
-      values: ['scheduled', 'completed', 'cancelled', 'no-show'],
+      values: ['scheduled', 'completed', 'cancelled'],
       message: 'حالة الزيارة غير صالحة'
-    }
+    },
+    default: 'completed',
+    index: true
   },
+  
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // Medical Data (Visible to Patient)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
   chiefComplaint: {
     type: String,
+    required: [true, 'الشكوى الرئيسية مطلوبة'],
+    trim: true,
     minlength: [5, 'الشكوى الرئيسية يجب أن تكون 5 أحرف على الأقل'],
-    maxlength: [500, 'الشكوى الرئيسية يجب ألا تتجاوز 500 حرف']
+    maxlength: [2000, 'الشكوى الرئيسية لا يمكن أن تتجاوز 2000 حرف']
   },
-  vitalSigns: {
-    bloodPressure: {
-      type: String,
-      match: [/^[0-9]{2,3}\/[0-9]{2,3}$/, 'ضغط الدم يجب أن يكون بصيغة XXX/XX']
-    },
-    heartRate: {
-      type: Number,
-      min: [30, 'معدل ضربات القلب يجب أن يكون بين 30 و 250'],
-      max: [250, 'معدل ضربات القلب يجب أن يكون بين 30 و 250']
-    },
-    temperature: {
-      type: Number,
-      min: [35, 'درجة الحرارة يجب أن تكون بين 35 و 43'],
-      max: [43, 'درجة الحرارة يجب أن تكون بين 35 و 43']
-    },
-    oxygenSaturation: {
-      type: Number,
-      min: [50, 'نسبة الأكسجين يجب أن تكون بين 50 و 100'],
-      max: [100, 'نسبة الأكسجين يجب أن تكون بين 50 و 100']
-    }
-  },
+  
   diagnosis: {
     type: String,
+    required: [true, 'التشخيص مطلوب'],
+    trim: true,
     minlength: [5, 'التشخيص يجب أن يكون 5 أحرف على الأقل'],
-    maxlength: [1000, 'التشخيص يجب ألا يتجاوز 1000 حرف']
+    maxlength: [2000, 'التشخيص لا يمكن أن يتجاوز 2000 حرف']
   },
+  
   prescribedMedications: [{
     medicationName: {
       type: String,
       required: [true, 'اسم الدواء مطلوب'],
+      trim: true,
       minlength: [2, 'اسم الدواء يجب أن يكون حرفين على الأقل'],
-      maxlength: [100, 'اسم الدواء يجب ألا يتجاوز 100 حرف']
+      maxlength: [100, 'اسم الدواء لا يمكن أن يتجاوز 100 حرف']
     },
     dosage: {
       type: String,
       required: [true, 'الجرعة مطلوبة'],
+      trim: true,
       minlength: [2, 'الجرعة يجب أن تكون حرفين على الأقل'],
-      maxlength: [50, 'الجرعة يجب ألا تتجاوز 50 حرفاً'],
-      match: [/^[0-9]+\s?(mg|g|ml|units?)$/, 'الجرعة يجب أن تكون بصيغة صحيحة (مثل: 500mg)']
+      maxlength: [50, 'الجرعة لا يمكن أن تتجاوز 50 حرف']
     },
     frequency: {
       type: String,
       required: [true, 'التكرار مطلوب'],
-      minlength: [5, 'التكرار يجب أن يكون 5 أحرف على الأقل'],
-      maxlength: [100, 'التكرار يجب ألا يتجاوز 100 حرف']
+      trim: true,
+      minlength: [3, 'التكرار يجب أن يكون 3 أحرف على الأقل'],
+      maxlength: [100, 'التكرار لا يمكن أن يتجاوز 100 حرف']
     },
     duration: {
       type: String,
       required: [true, 'المدة مطلوبة'],
-      minlength: [3, 'المدة يجب أن تكون 3 أحرف على الأقل'],
-      maxlength: [50, 'المدة يجب ألا تتجاوز 50 حرفاً']
+      trim: true,
+      minlength: [2, 'المدة يجب أن تكون حرفين على الأقل'],
+      maxlength: [50, 'المدة لا يمكن أن تتجاوز 50 حرف']
     }
   }],
-  labTests: [{
-    type: String,
-    minlength: [2, 'اسم التحليل يجب أن يكون حرفين على الأقل'],
-    maxlength: [100, 'اسم التحليل يجب ألا يتجاوز 100 حرف']
-  }],
+  
   doctorNotes: {
     type: String,
-    maxlength: [2000, 'ملاحظات الطبيب يجب ألا تتجاوز 2000 حرف']
-  },
-  followUpDate: {
-    type: Date,
-    default: null
+    trim: true,
+    maxlength: [5000, 'ملاحظات الطبيب لا يمكن أن تتجاوز 5000 حرف']
   }
+  
 }, {
   timestamps: true,
   collection: 'visits'
 });
 
-// Indexes
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Indexes for Performance
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 visitSchema.index({ patientId: 1, visitDate: -1 });
 visitSchema.index({ doctorId: 1, visitDate: -1 });
 visitSchema.index({ status: 1 });
 visitSchema.index({ visitDate: 1 });
+visitSchema.index({ visitType: 1 });
 
-module.exports = mongoose.model('Visit', visitSchema, 'visits');
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// Virtuals for Population
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+visitSchema.virtual('patient', {
+  ref: 'Person',
+  localField: 'patientId',
+  foreignField: '_id',
+  justOne: true
+});
+
+visitSchema.virtual('doctor', {
+  ref: 'Doctor',
+  localField: 'doctorId',
+  foreignField: '_id',
+  justOne: true
+});
+
+// Enable virtuals in JSON
+visitSchema.set('toJSON', { virtuals: true });
+visitSchema.set('toObject', { virtuals: true });
+
+module.exports = mongoose.model('Visit', visitSchema);

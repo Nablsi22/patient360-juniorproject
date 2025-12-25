@@ -1,5 +1,6 @@
 const express = require('express');
 const router = express.Router();
+const axios = require('axios');
 
 // Import controllers
 const patientController = require('../controllers/patientController');
@@ -133,7 +134,7 @@ router.get(
   '/visits/:visitId',
   protect,
   restrictTo('patient'),
-  verifyPatientOwnership, // This will verify visit ownership
+  verifyPatientOwnership,
   visitsLimiter,
   auditLog('VISIT'),
   visitController.getVisitDetails
@@ -206,30 +207,72 @@ router.get(
 );
 
 // ==========================================
-// AI RISK PREDICTION ROUTE (Placeholder)
+// ✨ NEW: AI SYMPTOM ANALYSIS ROUTE ✨
 // ==========================================
 
 /**
- * @route   POST /api/patient/ai-risk-prediction
- * @desc    Get AI-based health risk prediction
+ * @route   POST /api/patient/ai-symptom-analysis
+ * @desc    Analyze patient symptoms using AI model
  * @access  Private (Patient only)
- * @note    Placeholder for future AI model integration
  */
 router.post(
-  '/ai-risk-prediction',
+  '/ai-symptom-analysis',
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
   profileLimiter,
   auditLog('PATIENT_PROFILE'),
-  (req, res) => {
-    // Placeholder response
-    res.status(200).json({
-      success: true,
-      message: 'AI model integration coming soon',
-      status: 'pending',
-      note: 'This endpoint is ready for your AI model integration'
-    });
+  async (req, res) => {
+    try {
+      const { symptoms } = req.body;
+      
+      // Validation
+      if (!symptoms || symptoms.trim().length === 0) {
+        return res.status(400).json({
+          success: false,
+          message: 'يرجى إدخال الأعراض'
+        });
+      }
+
+      console.log('📝 Patient symptoms:', symptoms);
+      console.log('🤖 Calling AI service...');
+      
+      // Call AI service (FastAPI running on port 8000)
+      const aiResponse = await axios.post('http://localhost:8000/predict', {
+        symptoms: symptoms
+      }, {
+        timeout: 30000 // 30 second timeout
+      });
+      
+      console.log('✅ AI Response:', aiResponse.data);
+      
+      res.status(200).json({
+        success: true,
+        data: aiResponse.data
+      });
+      
+    } catch (error) {
+      console.error('❌ AI Analysis Error:', error.message);
+      
+      if (error.code === 'ECONNREFUSED') {
+        return res.status(503).json({
+          success: false,
+          message: 'خدمة الذكاء الاصطناعي غير متاحة حالياً. يرجى المحاولة لاحقاً'
+        });
+      }
+      
+      if (error.code === 'ETIMEDOUT' || error.code === 'ECONNABORTED') {
+        return res.status(504).json({
+          success: false,
+          message: 'انتهت مهلة الاتصال بخدمة الذكاء الاصطناعي. يرجى المحاولة مرة أخرى'
+        });
+      }
+      
+      res.status(500).json({
+        success: false,
+        message: 'حدث خطأ أثناء تحليل الأعراض'
+      });
+    }
   }
 );
 

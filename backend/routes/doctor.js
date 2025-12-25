@@ -3,7 +3,6 @@ const router = express.Router();
 
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
-const { auditLog } = require('../middleware/auditLog');
 const { profileLimiter } = require('../middleware/rateLimiter');
 
 // Import models
@@ -11,12 +10,14 @@ const Patient = require('../models/Patient');
 const Person = require('../models/Person');
 const Account = require('../models/Account');
 
+// Import visit controller
+const visitController = require('../controllers/visitController');
+
 /**
  * ALL ROUTES REQUIRE:
  * 1. Authentication (protect)
  * 2. Doctor role only (restrictTo('doctor'))
- * 3. Audit logging
- * 4. Rate limiting
+ * 3. Rate limiting
  */
 
 // ==========================================
@@ -33,7 +34,6 @@ router.get(
   protect,
   restrictTo('doctor'),
   profileLimiter,
-  auditLog('DOCTOR_SEARCH_PATIENT'),
   async (req, res) => {
     try {
       const { nationalId } = req.params;
@@ -96,7 +96,6 @@ router.get(
   protect,
   restrictTo('doctor'),
   profileLimiter,
-  auditLog('DOCTOR_GET_PATIENTS'),
   async (req, res) => {
     try {
       // Get all patients
@@ -159,7 +158,6 @@ router.put(
   protect,
   restrictTo('doctor'),
   profileLimiter,
-  auditLog('DOCTOR_UPDATE_PATIENT'),
   async (req, res) => {
     try {
       const { nationalId } = req.params;
@@ -216,6 +214,75 @@ router.put(
       });
     }
   }
+);
+
+// ==========================================
+// VISIT MANAGEMENT ROUTES
+// ==========================================
+
+/**
+ * @route   POST /api/doctor/patient/:nationalId/visit
+ * @desc    Create a new visit for a patient
+ * @access  Private (Doctor only)
+ */
+router.post(
+  '/patient/:nationalId/visit',
+  protect,
+  restrictTo('doctor'),
+  profileLimiter,
+  visitController.createVisit
+);
+
+/**
+ * @route   GET /api/doctor/patient/:nationalId/visits
+ * @desc    Get all visits for a specific patient
+ * @access  Private (Doctor only)
+ */
+router.get(
+  '/patient/:nationalId/visits',
+  protect,
+  restrictTo('doctor'),
+  profileLimiter,
+  visitController.getPatientVisitsByNationalId
+);
+
+/**
+ * @route   GET /api/doctor/visits
+ * @desc    Get all visits by this doctor
+ * @access  Private (Doctor only)
+ */
+router.get(
+  '/visits',
+  protect,
+  restrictTo('doctor'),
+  profileLimiter,
+  visitController.getDoctorVisits
+);
+
+/**
+ * @route   GET /api/doctor/visit/:visitId
+ * @desc    Get visit details
+ * @access  Private (Doctor only)
+ */
+router.get(
+  '/visit/:visitId',
+  protect,
+  restrictTo('doctor'),
+  profileLimiter,
+  visitController.getVisitDetailsDoctor
+);
+
+/**
+ * @route   PUT /api/doctor/visit/:visitId
+ * @desc    Update visit
+ * @access  Private (Doctor only)
+ */
+router.put(
+  '/visit/:visitId',
+  protect,
+  restrictTo('doctor'),
+  profileLimiter,
+  visitController.updateVisit
 );
 
 module.exports = router;
