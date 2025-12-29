@@ -562,6 +562,9 @@ const PatientDashboard = () => {
   const [modal, setModal] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(false);
+  const [medications, setMedications] = useState([]);
+const [medicationSchedule, setMedicationSchedule] = useState(null);
+const [loadingMedications, setLoadingMedications] = useState(false);
   const [expandedVisit, setExpandedVisit] = useState(null);
   const [activeSection, setActiveSection] = useState('overview');
   const [symptoms, setSymptoms] = useState('');
@@ -688,6 +691,54 @@ const PatientDashboard = () => {
     
     loadVisits();
   }, [user]);
+
+  useEffect(() => {
+  const loadMedications = async () => {
+    if (!user) return;
+    
+    setLoadingMedications(true);
+    
+    try {
+      const token = localStorage.getItem('token');
+      
+      console.log('💊 Loading medications...');
+      
+      // Load current medications
+      const medsResponse = await fetch('http://localhost:5000/api/patient/medications', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      const medsData = await medsResponse.json();
+      console.log('📥 Medications response:', medsData);
+      
+      if (medsResponse.ok && medsData.success) {
+        setMedications(medsData.medications || []);
+      }
+      
+      // Load medication schedule
+      const scheduleResponse = await fetch('http://localhost:5000/api/patient/medications/schedule', {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      
+      const scheduleData = await scheduleResponse.json();
+      console.log('📅 Schedule response:', scheduleData);
+      
+      if (scheduleResponse.ok && scheduleData.success) {
+        setMedicationSchedule(scheduleData.schedule);
+      }
+      
+      console.log('🔍 Final Medications:', medsData.medications);
+      console.log('🔍 Final Schedule:', scheduleData.schedule);
+
+    } catch (error) {
+      console.error('❌ Error loading medications:', error);
+    } finally {
+      setLoadingMedications(false);
+    }
+  };
+  
+  loadMedications();
+}, [user]);
 
   const handleLogout = () => openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', () => authAPI.logout());
   
@@ -1245,18 +1296,222 @@ const PatientDashboard = () => {
         )}
 
         {/* MEDICATIONS SECTION */}
-        {activeSection === 'medications' && (
-          <div className="section-content">
-            <div className="card">
-              <div className="card-header"><h2>💊 تقويم الأدوية</h2></div>
-              <div className="empty-state">
-                <div className="empty-icon">💊</div>
-                <h3>لا توجد أدوية</h3>
-                <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
+      {activeSection === 'medications' && (
+  <div className="section-content">
+    <div className="medications-page-container">
+      {/* Header */}
+      <div className="medications-page-header">
+        <div className="medications-header-content">
+          <div className="medications-icon-box">
+            <span>💊</span>
+            <div className="pulse-ring"></div>
+          </div>
+          <div className="medications-header-text">
+            <h1>تقويم الأدوية</h1>
+            <p>Medication Calendar & Schedule</p>
+          </div>
+        </div>
+        <div className="medications-count-badge">
+          <span className="count-number">{medications.length}</span>
+          <span>دواء نشط</span>
+        </div>
+      </div>
+
+      {/* Loading State */}
+      {loadingMedications && (
+        <div className="loading-state">
+          <div className="spinner"></div>
+          <p>جاري تحميل الأدوية...</p>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {!loadingMedications && medications.length === 0 && (
+        <div className="empty-state-card">
+          <div className="empty-icon">💊</div>
+          <h3>لا توجد أدوية موصوفة</h3>
+          <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
+          <div className="empty-info">
+            <span>💡</span>
+            <p>التقويم يعرض مواعيد تناول الأدوية اليومية والأسبوعية</p>
+          </div>
+        </div>
+      )}
+
+      {/* Active Medications */}
+      {!loadingMedications && medications.length > 0 && (
+        <>
+          {/* Current Medications List */}
+          <div className="current-medications-section">
+            <div className="section-header-meds">
+              <div className="header-left">
+                <span className="section-icon">📋</span>
+                <div>
+                  <h2>الأدوية النشطة</h2>
+                  <p>Active Medications</p>
+                </div>
               </div>
+              <span className="meds-count-badge">{medications.length} دواء</span>
+            </div>
+
+            <div className="medications-grid">
+              {medications.map((med, index) => (
+                <div key={index} className="medication-card-calendar">
+                  {/* Card Header */}
+                  <div className="med-card-header-calendar">
+                    <div className="med-icon-wrapper">
+                      <span>💊</span>
+                    </div>
+                    <div className="med-header-info">
+                      <h3>{med.medicationName}</h3>
+                      <p className="med-dosage">{med.dosage}</p>
+                    </div>
+                  </div>
+
+                  {/* Card Body */}
+                  <div className="med-card-body-calendar">
+                    <div className="med-info-row">
+                      <span className="info-icon">🕐</span>
+                      <div className="info-content">
+                        <span className="info-label">التكرار:</span>
+                        <span className="info-value">{med.frequency}</span>
+                      </div>
+                    </div>
+
+                    {med.duration && (
+                      <div className="med-info-row">
+                        <span className="info-icon">⏱️</span>
+                        <div className="info-content">
+                          <span className="info-label">المدة:</span>
+                          <span className="info-value">{med.duration}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {med.instructions && (
+                      <div className="med-info-row">
+                        <span className="info-icon">📝</span>
+                        <div className="info-content">
+                          <span className="info-label">التعليمات:</span>
+                          <span className="info-value">{med.instructions}</span>
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Doctor Info */}
+                    <div className="med-doctor-info">
+                      <div className="doctor-avatar-small">
+                        <span>👨‍⚕️</span>
+                      </div>
+                      <div className="doctor-details-small">
+                        <span className="doctor-name-small">{med.doctorName}</span>
+                        {med.doctorSpecialization && (
+                          <span className="doctor-spec-small">{med.doctorSpecialization}</span>
+                        )}
+                      </div>
+                    </div>
+
+                    {/* Prescribed Date */}
+                    <div className="prescribed-date">
+                      <span className="date-icon">📅</span>
+                      <span className="date-text">
+                        {new Date(med.visitDate).toLocaleDateString('ar-EG', {
+                          year: 'numeric',
+                          month: 'short',
+                          day: 'numeric'
+                        })}
+                      </span>
+                    </div>
+                  </div>
+                </div>
+              ))}
             </div>
           </div>
-        )}
+
+          {/* Weekly Schedule */}
+          {medicationSchedule && medicationSchedule.weeklySchedule && (
+            <div className="weekly-schedule-section">
+              <div className="section-header-meds">
+                <div className="header-left">
+                  <span className="section-icon">📅</span>
+                  <div>
+                    <h2>التقويم الأسبوعي</h2>
+                    <p>Weekly Medication Schedule</p>
+                  </div>
+                </div>
+              </div>
+
+              <div className="weekly-schedule-grid">
+                {medicationSchedule.weeklySchedule.map((daySchedule, index) => (
+                  <div 
+                    key={index} 
+                    className={`day-schedule-card ${index === new Date().getDay() ? 'today' : ''}`}
+                  >
+                    {/* Day Header */}
+                    <div className="day-header">
+                      <h3>{daySchedule.day}</h3>
+                      {index === new Date().getDay() && (
+                        <span className="today-badge">اليوم</span>
+                      )}
+                      <span className="day-count">
+                        {daySchedule.medications.length} جرعة
+                      </span>
+                    </div>
+
+                    {/* Day Medications Timeline */}
+                    <div className="day-medications-timeline">
+                      {daySchedule.medications.length > 0 ? (
+                        daySchedule.medications.map((med, medIndex) => (
+                          <div key={medIndex} className="timeline-item">
+                            <div className="timeline-time">
+                              <span className="time-icon">🕐</span>
+                              <span className="time-text">{med.time}</span>
+                            </div>
+                            <div className="timeline-content">
+                              <div className="timeline-med-name">
+                                <span className="med-icon-small">💊</span>
+                                <span>{med.medicationName}</span>
+                              </div>
+                              <div className="timeline-med-dosage">{med.dosage}</div>
+                              {med.instructions && (
+                                <div className="timeline-med-instructions">
+                                  {med.instructions}
+                                </div>
+                              )}
+                            </div>
+                          </div>
+                        ))
+                      ) : (
+                        <div className="no-medications-day">
+                          <span>✓</span>
+                          <p>لا توجد أدوية</p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* Medication Instructions Banner */}
+          <div className="medication-instructions-banner">
+            <div className="instructions-icon">⚠️</div>
+            <div className="instructions-content">
+              <h4>تعليمات هامة</h4>
+              <ul>
+                <li>التزم بمواعيد تناول الأدوية المحددة من قبل الطبيب</li>
+                <li>لا توقف أو تغير الجرعة دون استشارة الطبيب</li>
+                <li>احتفظ بالأدوية في مكان آمن وبعيد عن متناول الأطفال</li>
+                <li>في حالة نسيان جرعة، استشر الطبيب أو الصيدلي</li>
+              </ul>
+            </div>
+          </div>
+        </>
+      )}
+    </div>
+  </div>
+)}
       </div>
     </div>
   );
