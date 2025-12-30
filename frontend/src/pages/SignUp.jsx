@@ -151,6 +151,8 @@ const SignUp = () => {
     gender: 'male',
     phoneNumber: '',
     email: '',
+    password: '',
+    confirmPassword: '',
     address: '',
     governorate: '',
     city: '',
@@ -576,6 +578,18 @@ const SignUp = () => {
   const handleDoctorSubmit = async (e) => {
     e.preventDefault();
     
+    // Validate password match
+    if (doctorFormData.password !== doctorFormData.confirmPassword) {
+      openModal('error', 'خطأ', 'كلمات المرور غير متطابقة');
+      return;
+    }
+    
+    // Validate password length
+    if (doctorFormData.password.length < 8) {
+      openModal('error', 'خطأ', 'كلمة المرور يجب أن تكون 8 أحرف على الأقل');
+      return;
+    }
+    
     setLoading(true);
     
     try {
@@ -590,6 +604,7 @@ const SignUp = () => {
       formData.append('gender', doctorFormData.gender);
       formData.append('phoneNumber', doctorFormData.phoneNumber.trim());
       formData.append('email', doctorFormData.email.trim().toLowerCase());
+      formData.append('password', doctorFormData.password);
       formData.append('address', doctorFormData.address.trim());
       formData.append('governorate', doctorFormData.governorate);
       formData.append('city', doctorFormData.city.trim());
@@ -602,21 +617,25 @@ const SignUp = () => {
       formData.append('hospitalAffiliation', doctorFormData.hospitalAffiliation.trim());
       formData.append('availableDays', JSON.stringify(doctorFormData.availableDays));
       formData.append('consultationFee', doctorFormData.consultationFee || '0');
-      formData.append('additionalNotes', doctorFormData.additionalNotes.trim());
       
       // Files
-      if (doctorFormData.licenseDocument) {
-        formData.append('licenseDocument', doctorFormData.licenseDocument);
-      }
       if (doctorFormData.medicalCertificate) {
         formData.append('medicalCertificate', doctorFormData.medicalCertificate);
+        console.log('📎 Medical certificate attached');
+      }
+      if (doctorFormData.licenseDocument) {
+        formData.append('licenseDocument', doctorFormData.licenseDocument);
+        console.log('📎 License document attached');
       }
       if (doctorFormData.profilePhoto) {
         formData.append('profilePhoto', doctorFormData.profilePhoto);
+        console.log('📎 Profile photo attached');
       }
       
+      console.log('📤 Submitting doctor registration...');
+      
       // Submit to API
-      const response = await fetch('http://localhost:5000/api/auth/doctor-request', {
+      const response = await fetch('http://localhost:5000/api/auth/register-doctor', {
         method: 'POST',
         body: formData
       });
@@ -629,10 +648,16 @@ const SignUp = () => {
         setRequestStatus('pending');
         setRequestId(data.requestId);
         
+        const filesInfo = data.data.uploadedFiles || {};
+        const filesText = [];
+        if (filesInfo.medicalCertificate) filesText.push('✅ شهادة الطب');
+        if (filesInfo.licenseDocument) filesText.push('✅ الترخيص الطبي');
+        if (filesInfo.profilePhoto) filesText.push('✅ الصورة الشخصية');
+        
         openModal(
           'success',
           'تم تقديم الطلب بنجاح! 📋',
-          `مرحباً د. ${doctorFormData.firstName} ${doctorFormData.lastName}\n\nتم استلام طلب التسجيل الخاص بك وسيتم مراجعته من قبل وزارة الصحة.\n\nرقم الطلب: ${data.requestId}\n\nستتلقى إشعاراً عند قبول أو رفض الطلب.\n\nحالة الطلب الحالية: قيد المراجعة ⏳`
+          `مرحباً د. ${doctorFormData.firstName} ${doctorFormData.lastName}\n\nتم استلام طلب التسجيل الخاص بك وسيتم مراجعته من قبل وزارة الصحة.\n\nرقم الطلب: ${data.requestId}\n\n${filesText.length > 0 ? 'الملفات المرفقة:\n' + filesText.join('\n') + '\n\n' : ''}حالة الطلب: قيد المراجعة ⏳`
         );
       } else {
         openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء تقديم الطلب');
@@ -1652,6 +1677,41 @@ const SignUp = () => {
                   />
                   {errors.email && <span className="error-message">{errors.email}</span>}
                   <small className="form-hint">سيتم إرسال بيانات الدخول إلى هذا البريد عند القبول</small>
+                </div>
+                
+                <div className="form-row">
+                  <div className="form-group">
+                    <label className="form-label">كلمة المرور *</label>
+                    <input
+                      type="password"
+                      name="password"
+                      className={`form-input ${errors.password ? 'error' : ''}`}
+                      value={doctorFormData.password}
+                      onChange={handleDoctorChange}
+                      required
+                      minLength={8}
+                      placeholder="8 أحرف على الأقل"
+                      dir="ltr"
+                    />
+                    {errors.password && <span className="error-message">{errors.password}</span>}
+                    <small className="form-hint">اختر كلمة مرور قوية</small>
+                  </div>
+
+                  <div className="form-group">
+                    <label className="form-label">تأكيد كلمة المرور *</label>
+                    <input
+                      type="password"
+                      name="confirmPassword"
+                      className={`form-input ${errors.confirmPassword ? 'error' : ''}`}
+                      value={doctorFormData.confirmPassword}
+                      onChange={handleDoctorChange}
+                      required
+                      minLength={8}
+                      placeholder="أعد إدخال كلمة المرور"
+                      dir="ltr"
+                    />
+                    {errors.confirmPassword && <span className="error-message">{errors.confirmPassword}</span>}
+                  </div>
                 </div>
                 
                 <div className="form-group">

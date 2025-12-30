@@ -9,6 +9,158 @@ import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
 import '../styles/AdminDashboard.css';
 
+// ============================================
+// RESPONSIVE HELPER COMPONENTS
+// ============================================
+
+/**
+ * ResponsiveTable - Displays as table on desktop, cards on mobile
+ */
+const ResponsiveTable = ({ columns, data, loading, emptyMessage, emptyIcon, renderActions }) => {
+  if (loading) {
+    return (
+      <div className="loading-state">
+        <div className="loading-spinner"></div>
+        <p>جاري التحميل...</p>
+      </div>
+    );
+  }
+
+  if (!data || data.length === 0) {
+    return (
+      <div className="empty-state">
+        <span className="empty-icon">{emptyIcon || '📋'}</span>
+        <h4>{emptyMessage || 'لا توجد بيانات'}</h4>
+      </div>
+    );
+  }
+
+  return (
+    <div className="responsive-table-wrapper">
+      {/* Desktop Table View */}
+      <table className="admin-table desktop-table">
+        <thead>
+          <tr>
+            {columns.map((col, i) => (
+              <th key={i} className={col.className || ''}>{col.header}</th>
+            ))}
+            {renderActions && <th className="actions-col">الإجراءات</th>}
+          </tr>
+        </thead>
+        <tbody>
+          {data.map((row, rowIndex) => (
+            <tr key={row._id || rowIndex}>
+              {columns.map((col, colIndex) => (
+                <td key={colIndex} className={col.cellClassName || ''} data-label={col.header}>
+                  {col.render ? col.render(row) : row[col.field]}
+                </td>
+              ))}
+              {renderActions && (
+                <td className="actions-cell">{renderActions(row)}</td>
+              )}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* Mobile Cards View */}
+      <div className="mobile-cards">
+        {data.map((row, rowIndex) => (
+          <div key={row._id || rowIndex} className="mobile-card">
+            <div className="mobile-card-header">
+              {columns[0]?.render ? columns[0].render(row) : row[columns[0]?.field]}
+            </div>
+            <div className="mobile-card-body">
+              {columns.slice(1).map((col, colIndex) => (
+                <div key={colIndex} className="mobile-card-row">
+                  <span className="mobile-label">{col.header}:</span>
+                  <span className="mobile-value">
+                    {col.render ? col.render(row) : row[col.field]}
+                  </span>
+                </div>
+              ))}
+            </div>
+            {renderActions && (
+              <div className="mobile-card-actions">{renderActions(row)}</div>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+};
+
+/**
+ * SearchFilterBar - Responsive search and filter controls
+ */
+const SearchFilterBar = ({ 
+  searchValue, 
+  onSearchChange, 
+  searchPlaceholder, 
+  filters,
+  activeFilter,
+  onFilterChange 
+}) => (
+  <div className="search-filter-bar responsive">
+    <div className="search-input-wrapper">
+      <span className="search-icon">🔍</span>
+      <input
+        type="text"
+        placeholder={searchPlaceholder || 'بحث...'}
+        value={searchValue}
+        onChange={(e) => onSearchChange(e.target.value)}
+        className="search-input"
+      />
+      {searchValue && (
+        <button className="clear-search-btn" onClick={() => onSearchChange('')}>✕</button>
+      )}
+    </div>
+    {filters && (
+      <div className="filter-buttons responsive">
+        {filters.map((filter) => (
+          <button
+            key={filter.value}
+            className={`filter-btn ${filter.colorClass || ''} ${activeFilter === filter.value ? 'active' : ''}`}
+            onClick={() => onFilterChange(filter.value)}
+          >
+            {filter.icon && <span className="filter-icon">{filter.icon}</span>}
+            {filter.label}
+            {filter.count !== undefined && <span className="filter-count">({filter.count})</span>}
+          </button>
+        ))}
+      </div>
+    )}
+  </div>
+);
+
+/**
+ * ResponsiveModal - Modal with responsive sizing
+ */
+const ResponsiveModal = ({ 
+  isOpen, 
+  onClose, 
+  title, 
+  children, 
+  size = 'medium',
+  footer 
+}) => {
+  if (!isOpen) return null;
+
+  return (
+    <div className="modal-overlay" onClick={onClose}>
+      <div 
+        className={`modal-content responsive-modal ${size}`} 
+        onClick={(e) => e.stopPropagation()}
+      >
+        <button className="modal-close" onClick={onClose}>✕</button>
+        {title && <h3 className="modal-title">{title}</h3>}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
+      </div>
+    </div>
+  );
+};
+
 /**
  * ============================================
  * DATABASE SCHEMA REFERENCE (from metadata)
@@ -210,15 +362,30 @@ const getGovernorateName = (govId) => {
 // COMPONENTS
 // ============================================
 
+/**
+ * StatCard - Responsive statistics card with touch-friendly design
+ */
 const StatCard = ({ icon, value, label, sublabel, color, onClick, badge }) => (
-  <div className={`stat-card ${color}`} onClick={onClick} style={{ cursor: onClick ? 'pointer' : 'default' }}>
+  <div 
+    className={`stat-card responsive ${color}`} 
+    onClick={onClick} 
+    style={{ cursor: onClick ? 'pointer' : 'default' }}
+    role={onClick ? 'button' : undefined}
+    tabIndex={onClick ? 0 : undefined}
+    onKeyDown={(e) => {
+      if (onClick && (e.key === 'Enter' || e.key === ' ')) {
+        e.preventDefault();
+        onClick();
+      }
+    }}
+  >
     <div className="stat-card-icon"><span>{icon}</span></div>
     <div className="stat-card-content">
       <h3 className="stat-value">{value}</h3>
       <p className="stat-label">{label}</p>
       {sublabel && <span className="stat-sublabel">{sublabel}</span>}
     </div>
-    {badge && <span className="stat-badge">{badge}</span>}
+    {badge && <span className="stat-badge pulse">{badge}</span>}
   </div>
 );
 
@@ -377,6 +544,7 @@ const AdminDashboard = () => {
       const allPatients = patientsData.success ? (patientsData.patients || []) : [];
       const allRequests = requestsData.success ? (requestsData.requests || []) : [];
       const pendingRequests = allRequests.filter(r => r.status === 'pending');
+      setDoctorRequests(allRequests);
       
       setStatistics({
         totalDoctors: allDoctors.length,
@@ -702,101 +870,97 @@ const AdminDashboard = () => {
     setShowRequestDetails(true);
   };
 
-  const handleAcceptRequest = async () => {
-    if (!selectedRequest) return;
+const handleAcceptRequest = async () => {
+  if (!selectedRequest) return;
 
-    setProcessingRequest(true);
+  setProcessingRequest(true);
 
-    try {
-      const email = generateDoctorEmail(
-        selectedRequest.firstName, 
-        selectedRequest.lastName, 
-        selectedRequest.medicalLicenseNumber
-      );
-      const password = generatePassword();
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`http://localhost:5000/api/admin/doctor-requests/${selectedRequest._id}/accept`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        adminNotes: ''  // ← فقط adminNotes!
+      })
+    });
 
-      const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/admin/doctor-requests/${selectedRequest._id}/accept`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          generatedEmail: email,
-          generatedPassword: password
-        })
+    const data = await res.json();
+    console.log('📥 Backend response:', data);
+
+    if (data.success) {
+      // ✅ عرض بيانات الدخول من Backend
+      setGeneratedCredentials({
+        email: data.data.email,      // ← من Backend (signup email)
+        password: data.data.password, // ← من Backend (signup password plaintext)
+        doctorName: data.data.doctorName
       });
-
-      const data = await res.json();
-
-      if (data.success) {
-        setGeneratedCredentials({
-          email,
-          password,
-          doctorName: `${selectedRequest.firstName} ${selectedRequest.lastName}`
-        });
-        setShowAcceptConfirm(false);
-        setShowRequestDetails(false);
-        
-        loadDoctorRequests();
-        loadStatistics();
-        logAuditAction('ACCEPT_DOCTOR_REQUEST', `تم قبول طلب تسجيل الطبيب: ${selectedRequest.firstName} ${selectedRequest.lastName}`);
-      } else {
-        openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء قبول الطلب');
-      }
-    } catch (error) {
-      console.error('Error accepting request:', error);
-      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
-    } finally {
-      setProcessingRequest(false);
+      
+      setShowAcceptConfirm(false);
+      setShowRequestDetails(false);
+      
+      loadDoctorRequests();
+      loadStatistics();
+      logAuditAction('ACCEPT_DOCTOR_REQUEST', `تم قبول طلب تسجيل الطبيب: ${selectedRequest.personalInfo?.firstName} ${selectedRequest.personalInfo?.lastName}`);
+    } else {
+      openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء قبول الطلب');
     }
-  };
+  } catch (error) {
+    console.error('❌ Error accepting request:', error);
+    openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
+  } finally {
+    setProcessingRequest(false);
+  }
+};
 
-  const handleRejectRequest = async () => {
-    if (!selectedRequest || !rejectReason) {
-      openModal('error', 'خطأ', 'الرجاء اختيار سبب الرفض');
-      return;
+
+const handleRejectRequest = async () => {
+  if (!selectedRequest || !rejectReason) {
+    openModal('error', 'خطأ', 'الرجاء اختيار سبب الرفض');
+    return;
+  }
+
+  setProcessingRequest(true);
+
+  try {
+    const token = localStorage.getItem('token');
+    const res = await fetch(`http://localhost:5000/api/admin/doctor-requests/${selectedRequest._id}/reject`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': `Bearer ${token}`
+      },
+      body: JSON.stringify({
+        rejectionReason: rejectReason,  // ← ✅ غيّرنا من reason
+        adminNotes: rejectNotes         // ← ✅ غيّرنا من notes
+      })
+    });
+
+    const data = await res.json();
+
+    if (data.success) {
+      openModal('success', 'تم الرفض', 'تم رفض طلب التسجيل بنجاح');
+      setShowRejectModal(false);
+      setShowRequestDetails(false);
+      setRejectReason('');
+      setRejectNotes('');
+      
+      loadDoctorRequests();
+      loadStatistics();
+      logAuditAction('REJECT_DOCTOR_REQUEST', `تم رفض طلب تسجيل الطبيب: ${selectedRequest.personalInfo?.firstName} ${selectedRequest.personalInfo?.lastName} - السبب: ${rejectReason}`);
+    } else {
+      openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء رفض الطلب');
     }
-
-    setProcessingRequest(true);
-
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/admin/doctor-requests/${selectedRequest._id}/reject`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({
-          reason: rejectReason,
-          notes: rejectNotes
-        })
-      });
-
-      const data = await res.json();
-
-      if (data.success) {
-        openModal('success', 'تم الرفض', 'تم رفض طلب التسجيل بنجاح');
-        setShowRejectModal(false);
-        setShowRequestDetails(false);
-        setRejectReason('');
-        setRejectNotes('');
-        
-        loadDoctorRequests();
-        loadStatistics();
-        logAuditAction('REJECT_DOCTOR_REQUEST', `تم رفض طلب تسجيل الطبيب: ${selectedRequest.firstName} ${selectedRequest.lastName} - السبب: ${rejectReason}`);
-      } else {
-        openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء رفض الطلب');
-      }
-    } catch (error) {
-      console.error('Error rejecting request:', error);
-      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
-    } finally {
-      setProcessingRequest(false);
-    }
-  };
+  } catch (error) {
+    console.error('Error rejecting request:', error);
+    openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
+  } finally {
+    setProcessingRequest(false);
+  }
+};
 
   // ============================================
   // DEACTIVATION
@@ -943,15 +1107,15 @@ const AdminDashboard = () => {
   // ═══════════════════════════════════════════════════════════════
   const filteredRequests = doctorRequests.filter(request => {
     const matchesSearch = 
-      request.firstName?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
-      request.lastName?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
-      request.medicalLicenseNumber?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
-      request.nationalId?.includes(requestSearchTerm) ||
-      request.requestId?.includes(requestSearchTerm);
+      request.personalInfo?.firstName?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
+      request.personalInfo?.lastName?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
+      request.doctorInfo?.medicalLicenseNumber?.toLowerCase().includes(requestSearchTerm.toLowerCase()) ||
+      request.personalInfo?.nationalId?.includes(requestSearchTerm) ||
+      request._id?.includes(requestSearchTerm);
     
     const matchesFilter = 
       requestFilter === 'all' ||
-      request.status === requestFilter;
+      request.requestInfo?.status === requestFilter;
     
     return matchesSearch && matchesFilter;
   });
@@ -1155,19 +1319,19 @@ const AdminDashboard = () => {
                     className={`filter-btn pending ${requestFilter === 'pending' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('pending')}
                   >
-                    ⏳ معلق ({doctorRequests.filter(r => r.status === 'pending').length})
+                    ⏳ معلق ({doctorRequests.filter(r => r.requestInfo?.status === 'pending').length})
                   </button>
                   <button 
                     className={`filter-btn accepted ${requestFilter === 'accepted' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('accepted')}
                   >
-                    ✅ مقبول ({doctorRequests.filter(r => r.status === 'accepted').length})
+                    ✅ مقبول ({doctorRequests.filter(r => r.requestInfo?.status === 'accepted').length})
                   </button>
                   <button 
                     className={`filter-btn rejected ${requestFilter === 'rejected' ? 'active' : ''}`}
                     onClick={() => setRequestFilter('rejected')}
                   >
-                    ❌ مرفوض ({doctorRequests.filter(r => r.status === 'rejected').length})
+                    ❌ مرفوض ({doctorRequests.filter(r => r.requestInfo?.status === 'rejected').length})
                   </button>
                 </div>
               </div>
@@ -1198,16 +1362,16 @@ const AdminDashboard = () => {
                         <th>الإجراءات</th>
                       </tr>
                     </thead>
-                    <tbody>
+                   
                       {filteredRequests.map((request) => {
-                        const specInfo = getSpecializationInfo(request.specialization);
+                        const specInfo = getSpecializationInfo(request.doctorInfo?.specialization);
                         return (
-                          <tr key={request._id} className={`status-${request.status}`}>
+                          <tr key={request._id} className={`status-${request.requestInfo?.status}`}>
                             <td className="request-id">{request.requestId || request._id.slice(-8)}</td>
                             <td className="name-cell">
                               <div className="name-info">
-                                <span className="full-name">{request.firstName} {request.lastName}</span>
-                                <span className="national-id">{request.nationalId}</span>
+                                <span className="full-name">{request.personalInfo?.firstName} {request.personalInfo?.lastName}</span>
+                                <span className="national-id">{request.personalInfo?.nationalId}</span>
                               </div>
                             </td>
                             <td>
@@ -1217,13 +1381,13 @@ const AdminDashboard = () => {
                                 {specInfo.hasECG && <span className="ecg-badge">ECG AI</span>}
                               </span>
                             </td>
-                            <td className="license-cell">{request.medicalLicenseNumber}</td>
-                            <td className="date-cell">{formatDate(request.createdAt)}</td>
+                            <td className="license-cell">{request.doctorInfo?.medicalLicenseNumber}</td>
+                            <td className="date-cell">{formatDate(request.requestInfo?.submittedAt)}</td>
                             <td>
-                              <span className={`status-badge status-${request.status}`}>
-                                {request.status === 'pending' && '⏳ قيد المراجعة'}
-                                {request.status === 'accepted' && '✅ مقبول'}
-                                {request.status === 'rejected' && '❌ مرفوض'}
+                              <span className={`status-badge status-${request.requestInfo?.status}`}>
+                                {request.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
+                                {request.requestInfo?.status === 'accepted' && '✅ مقبول'}
+                                {request.requestInfo?.status === 'rejected' && '❌ مرفوض'}
                               </span>
                             </td>
                             <td className="actions-cell">
@@ -1234,7 +1398,7 @@ const AdminDashboard = () => {
                               >
                                 👁️
                               </button>
-                              {request.status === 'pending' && (
+                              {request.requestInfo?.status === 'pending' && (
                                 <>
                                   <button 
                                     className="action-btn accept"
@@ -1262,7 +1426,6 @@ const AdminDashboard = () => {
                           </tr>
                         );
                       })}
-                    </tbody>
                   </table>
                 </div>
               )}
@@ -1593,10 +1756,10 @@ const AdminDashboard = () => {
             <div className="request-details-header">
               <div className="request-info-main">
                 <h2>تفاصيل طلب التسجيل</h2>
-                <span className={`status-badge large status-${selectedRequest.status}`}>
-                  {selectedRequest.status === 'pending' && '⏳ قيد المراجعة'}
-                  {selectedRequest.status === 'accepted' && '✅ تم القبول'}
-                  {selectedRequest.status === 'rejected' && '❌ مرفوض'}
+                <span className={`status-badge large status-${selectedRequest.requestInfo?.status}`}>
+                  {selectedRequest.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
+                  {selectedRequest.requestInfo?.status === 'accepted' && '✅ تم القبول'}
+                  {selectedRequest.requestInfo?.status === 'rejected' && '❌ مرفوض'}
                 </span>
               </div>
               <p className="request-id-display">رقم الطلب: {selectedRequest.requestId || selectedRequest._id}</p>
@@ -1608,35 +1771,35 @@ const AdminDashboard = () => {
                 <h4><span>👤</span> المعلومات الشخصية</h4>
                 <div className="details-row">
                   <span className="label">الاسم الكامل:</span>
-                  <span className="value">{selectedRequest.firstName} {selectedRequest.lastName}</span>
+                  <span className="value">{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">الرقم الوطني:</span>
-                  <span className="value">{selectedRequest.nationalId}</span>
+                  <span className="value">{selectedRequest.personalInfo?.nationalId}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">تاريخ الميلاد:</span>
-                  <span className="value">{formatDate(selectedRequest.dateOfBirth)}</span>
+                  <span className="value">{formatDate(selectedRequest.personalInfo?.dateOfBirth)}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">الجنس:</span>
-                  <span className="value">{selectedRequest.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
+                  <span className="value">{selectedRequest.personalInfo?.gender === 'male' ? 'ذكر' : 'أنثى'}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">رقم الهاتف:</span>
-                  <span className="value">{selectedRequest.phoneNumber}</span>
+                  <span className="value">{selectedRequest.personalInfo?.phoneNumber}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">البريد الإلكتروني:</span>
-                  <span className="value">{selectedRequest.email}</span>
+                  <span className="value">{selectedRequest.accountInfo?.email}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">المحافظة:</span>
-                  <span className="value">{getGovernorateName(selectedRequest.governorate)}</span>
+                  <span className="value">{getGovernorateName(selectedRequest.personalInfo?.governorate)}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">العنوان:</span>
-                  <span className="value">{selectedRequest.address}</span>
+                  <span className="value">{selectedRequest.personalInfo?.address}</span>
                 </div>
               </div>
 
@@ -1645,13 +1808,13 @@ const AdminDashboard = () => {
                 <h4><span>🏥</span> المعلومات المهنية</h4>
                 <div className="details-row">
                   <span className="label">رقم الترخيص الطبي:</span>
-                  <span className="value license">{selectedRequest.medicalLicenseNumber}</span>
+                  <span className="value license">{selectedRequest.doctorInfo?.medicalLicenseNumber}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">التخصص:</span>
                   <span className="value">
                     {(() => {
-                      const spec = getSpecializationInfo(selectedRequest.specialization);
+                      const spec = getSpecializationInfo(selectedRequest.doctorInfo?.specialization);
                       return (
                         <span className="specialization-display">
                           <span>{spec.icon}</span> {spec.nameAr}
@@ -1669,11 +1832,11 @@ const AdminDashboard = () => {
                 )}
                 <div className="details-row">
                   <span className="label">سنوات الخبرة:</span>
-                  <span className="value">{selectedRequest.yearsOfExperience} سنة</span>
+                  <span className="value">{selectedRequest.doctorInfo?.yearsOfExperience} سنة</span>
                 </div>
                 <div className="details-row">
                   <span className="label">المستشفى / المركز الصحي:</span>
-                  <span className="value">{selectedRequest.hospitalAffiliation}</span>
+                  <span className="value">{selectedRequest.doctorInfo?.hospitalAffiliation}</span>
                 </div>
                 <div className="details-row">
                   <span className="label">أيام العمل:</span>
@@ -1686,7 +1849,7 @@ const AdminDashboard = () => {
                 </div>
                 <div className="details-row">
                   <span className="label">رسوم الكشف:</span>
-                  <span className="value">{selectedRequest.consultationFee?.toLocaleString()} ل.س</span>
+                  <span className="value">{selectedRequest.doctorInfo?.consultationFee?.toLocaleString()} ل.س</span>
                 </div>
               </div>
 
@@ -1735,7 +1898,7 @@ const AdminDashboard = () => {
                 <h4><span>📅</span> تفاصيل الطلب</h4>
                 <div className="details-row">
                   <span className="label">تاريخ تقديم الطلب:</span>
-                  <span className="value">{formatDateTime(selectedRequest.createdAt)}</span>
+                  <span className="value">{formatDateTime(selectedRequest.requestInfo?.submittedAt)}</span>
                 </div>
                 {selectedRequest.reviewedAt && (
                   <div className="details-row">
@@ -1759,7 +1922,7 @@ const AdminDashboard = () => {
             </div>
 
             {/* Actions */}
-            {selectedRequest.status === 'pending' && (
+            {selectedRequest.requestInfo?.status === 'pending' && (
               <div className="request-actions">
                 <button 
                   className="action-button accept"
@@ -1787,7 +1950,7 @@ const AdminDashboard = () => {
             <h3 className="modal-title">تأكيد قبول الطلب</h3>
             <p className="modal-message">
               هل أنت متأكد من قبول طلب تسجيل الطبيب:<br />
-              <strong>{selectedRequest.firstName} {selectedRequest.lastName}</strong>
+              <strong>{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</strong>
             </p>
             <p className="modal-note">
               سيتم إنشاء حساب للطبيب وإرسال بيانات الدخول إلى بريده الإلكتروني.
@@ -1820,7 +1983,7 @@ const AdminDashboard = () => {
             <h3 className="modal-title">رفض طلب التسجيل</h3>
             <p className="modal-message">
               رفض طلب تسجيل الطبيب:<br />
-              <strong>{selectedRequest.firstName} {selectedRequest.lastName}</strong>
+              <strong>{selectedRequest.personalInfo?.firstName} {selectedRequest.personalInfo?.lastName}</strong>
             </p>
             
             <div className="form-group">

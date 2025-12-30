@@ -21,12 +21,12 @@ const visitController = require('../controllers/visitController');
  */
 
 // ==========================================
-// SEARCH PATIENT ROUTE
+// SEARCH PATIENT ROUTE - ✅ FIXED FOR CHILDREN
 // ==========================================
 
 /**
  * @route   GET /api/doctor/search/:nationalId
- * @desc    Search for patient by national ID
+ * @desc    Search for patient by national ID or child ID
  * @access  Private (Doctor only)
  */
 router.get(
@@ -38,8 +38,20 @@ router.get(
     try {
       const { nationalId } = req.params;
 
-      // Find person by nationalId
-      const person = await Person.findOne({ nationalId }).lean();
+      // ✅ NEW: Check if searching for a child (contains hyphen)
+      const isChildSearch = nationalId.includes('-');
+      
+      let person;
+      
+      if (isChildSearch) {
+        // Search by childId for minors
+        console.log('🔍 Searching for child with childId:', nationalId);
+        person = await Person.findOne({ childId: nationalId }).lean();
+      } else {
+        // Search by nationalId for adults
+        console.log('🔍 Searching for adult with nationalId:', nationalId);
+        person = await Person.findOne({ nationalId }).lean();
+      }
 
       if (!person) {
         return res.status(404).json({
@@ -47,6 +59,8 @@ router.get(
           message: 'لم يتم العثور على المريض'
         });
       }
+
+      console.log('✅ Found person:', person._id);
 
       // Find patient data
       const patient = await Patient.findOne({ personId: person._id }).lean();
@@ -57,6 +71,8 @@ router.get(
           message: 'لم يتم العثور على بيانات المريض'
         });
       }
+
+      console.log('✅ Found patient:', patient._id);
 
       // Get account data
       const account = await Account.findOne({ personId: person._id })
@@ -72,12 +88,14 @@ router.get(
         registrationDate: account?.createdAt
       };
 
+      console.log('✅ Returning patient data');
+
       res.json({
         success: true,
         patient: patientData
       });
     } catch (error) {
-      console.error('Search patient error:', error);
+      console.error('❌ Search patient error:', error);
       res.status(500).json({
         success: false,
         message: 'حدث خطأ في البحث عن المريض'
