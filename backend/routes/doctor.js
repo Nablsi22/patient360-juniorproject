@@ -1,5 +1,7 @@
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const path = require('path');
 
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
@@ -13,6 +15,44 @@ const Account = require('../models/Account');
 // Import visit controller
 const visitController = require('../controllers/visitController');
 
+// ==========================================
+// MULTER CONFIGURATION FOR VISIT ATTACHMENTS
+// ==========================================
+
+const storage = multer.diskStorage({
+  destination: function (req, file, cb) {
+    cb(null, 'uploads/visits/');
+  },
+  filename: function (req, file, cb) {
+    const uniqueSuffix = Date.now() + '-' + Math.round(Math.random() * 1E9);
+    cb(null, 'visit-' + uniqueSuffix + path.extname(file.originalname));
+  }
+});
+
+const fileFilter = (req, file, cb) => {
+  const allowedTypes = [
+    'image/jpeg',
+    'image/jpg', 
+    'image/png',
+    'image/webp',
+    'application/pdf'
+  ];
+  
+  if (allowedTypes.includes(file.mimetype)) {
+    cb(null, true);
+  } else {
+    cb(new Error('نوع الملف غير مدعوم. الرجاء رفع صورة أو PDF فقط'), false);
+  }
+};
+
+const upload = multer({
+  storage: storage,
+  limits: {
+    fileSize: 10 * 1024 * 1024 // 10MB limit
+  },
+  fileFilter: fileFilter
+});
+
 /**
  * ALL ROUTES REQUIRE:
  * 1. Authentication (protect)
@@ -21,12 +61,12 @@ const visitController = require('../controllers/visitController');
  */
 
 // ==========================================
-// SEARCH PATIENT ROUTE - ✅ FIXED FOR CHILDREN
+// SEARCH PATIENT ROUTE
 // ==========================================
 
 /**
  * @route   GET /api/doctor/search/:nationalId
- * @desc    Search for patient by national ID or child ID
+ * @desc    Search for patient by national ID
  * @access  Private (Doctor only)
  */
 router.get(
@@ -38,20 +78,17 @@ router.get(
     try {
       const { nationalId } = req.params;
 
-      // ✅ NEW: Check if searching for a child (contains hyphen)
-      const isChildSearch = nationalId.includes('-');
-      
-      let person;
-      
-      if (isChildSearch) {
-        // Search by childId for minors
-        console.log('🔍 Searching for child with childId:', nationalId);
-        person = await Person.findOne({ childId: nationalId }).lean();
-      } else {
-        // Search by nationalId for adults
-        console.log('🔍 Searching for adult with nationalId:', nationalId);
-        person = await Person.findOne({ nationalId }).lean();
-      }
+console.log('🔍 Searching for:', nationalId);
+
+// ✅ Search by nationalId OR childId
+const person = await Person.findOne({
+  $or: [
+    { nationalId: nationalId },
+    { childId: nationalId }
+  ]
+}).lean();
+
+console.log('📥 Person found:', person ? '✅' : '❌');
 
       if (!person) {
         return res.status(404).json({
@@ -59,8 +96,6 @@ router.get(
           message: 'لم يتم العثور على المريض'
         });
       }
-
-      console.log('✅ Found person:', person._id);
 
       // Find patient data
       const patient = await Patient.findOne({ personId: person._id }).lean();
@@ -71,8 +106,6 @@ router.get(
           message: 'لم يتم العثور على بيانات المريض'
         });
       }
-
-      console.log('✅ Found patient:', patient._id);
 
       // Get account data
       const account = await Account.findOne({ personId: person._id })
@@ -88,14 +121,12 @@ router.get(
         registrationDate: account?.createdAt
       };
 
-      console.log('✅ Returning patient data');
-
       res.json({
         success: true,
         patient: patientData
       });
     } catch (error) {
-      console.error('❌ Search patient error:', error);
+      console.error('Search patient error:', error);
       res.status(500).json({
         success: false,
         message: 'حدث خطأ في البحث عن المريض'
@@ -240,7 +271,7 @@ router.put(
 
 /**
  * @route   POST /api/doctor/patient/:nationalId/visit
- * @desc    Create a new visit for a patient
+ * @desc    Create a new visit for a patient (WITH FILE UPLOAD)
  * @access  Private (Doctor only)
  */
 router.post(
@@ -248,6 +279,7 @@ router.post(
   protect,
   restrictTo('doctor'),
   profileLimiter,
+  upload.single('visitPhoto'),  // ⬅️ ADDED: File upload middleware
   visitController.createVisit
 );
 
