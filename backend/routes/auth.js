@@ -1,5 +1,5 @@
 // backend/routes/auth.js
-// COMPLETE FILE - Authentication routes with file upload support
+// Authentication routes with file upload support - NO RATE LIMITER
 
 const express = require('express');
 const router = express.Router();
@@ -8,7 +8,6 @@ const router = express.Router();
 const authController = require('../controllers/authController');
 
 // Import middleware
-const security = require('../middleware/security');
 const auth = require('../middleware/auth');
 
 // Import file upload middleware
@@ -17,19 +16,41 @@ const { uploadFields, handleUploadErrors } = require('../middleware/uploadDoctor
 // ==================== PUBLIC ROUTES ====================
 
 // Patient Signup
-router.post('/register', security.loginLimiter, authController.signup);
-router.post('/signup', security.loginLimiter, authController.signup);
+router.post('/register', authController.signup);
+router.post('/signup', authController.signup);
 
 // Doctor Registration Request (WITH FILE UPLOADS)
-// CRITICAL: uploadFields MUST come BEFORE authController.registerDoctorRequest
 router.post('/register-doctor', 
-  uploadFields,              // Process files FIRST
-  handleUploadErrors,        // Handle upload errors
-  authController.registerDoctorRequest  // Then process request
+  uploadFields,
+  handleUploadErrors,
+  authController.registerDoctorRequest
 );
 
 // Login
-router.post('/login', security.loginLimiter, authController.login);
+router.post('/login', authController.login);
+
+// ==================== FORGET PASSWORD ROUTES ====================
+
+/**
+ * @route   POST /api/auth/forgot-password
+ * @desc    Send OTP to email
+ * @access  Public
+ */
+router.post('/forgot-password', authController.forgotPassword);
+
+/**
+ * @route   POST /api/auth/verify-otp
+ * @desc    Verify OTP code
+ * @access  Public
+ */
+router.post('/verify-otp', authController.verifyOTP);
+
+/**
+ * @route   POST /api/auth/reset-password
+ * @desc    Reset password with OTP
+ * @access  Public
+ */
+router.post('/reset-password', authController.resetPassword);
 
 // ==================== PROTECTED ROUTES ====================
 

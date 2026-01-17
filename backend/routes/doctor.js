@@ -5,7 +5,6 @@ const path = require('path');
 
 // Import middleware
 const { protect, restrictTo } = require('../middleware/auth');
-const { profileLimiter } = require('../middleware/rateLimiter');
 
 // Import models
 const Patient = require('../models/Patient');
@@ -57,7 +56,6 @@ const upload = multer({
  * ALL ROUTES REQUIRE:
  * 1. Authentication (protect)
  * 2. Doctor role only (restrictTo('doctor'))
- * 3. Rate limiting
  */
 
 // ==========================================
@@ -73,22 +71,21 @@ router.get(
   '/search/:nationalId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       const { nationalId } = req.params;
 
-console.log('🔍 Searching for:', nationalId);
+      console.log('🔍 Searching for:', nationalId);
 
-// ✅ Search by nationalId OR childId
-const person = await Person.findOne({
-  $or: [
-    { nationalId: nationalId },
-    { childId: nationalId }
-  ]
-}).lean();
+      // Search by nationalId OR childId
+      const person = await Person.findOne({
+        $or: [
+          { nationalId: nationalId },
+          { childId: nationalId }
+        ]
+      }).lean();
 
-console.log('📥 Person found:', person ? '✅' : '❌');
+      console.log('📥 Person found:', person ? '✅' : '❌');
 
       if (!person) {
         return res.status(404).json({
@@ -144,7 +141,6 @@ router.get(
   '/patients',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       // Get all patients
@@ -206,7 +202,6 @@ router.put(
   '/patient/:nationalId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   async (req, res) => {
     try {
       const { nationalId } = req.params;
@@ -278,8 +273,7 @@ router.post(
   '/patient/:nationalId/visit',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
-  upload.single('visitPhoto'),  // ⬅️ ADDED: File upload middleware
+  upload.single('visitPhoto'),
   visitController.createVisit
 );
 
@@ -292,7 +286,6 @@ router.get(
   '/patient/:nationalId/visits',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getPatientVisitsByNationalId
 );
 
@@ -305,7 +298,6 @@ router.get(
   '/visits',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getDoctorVisits
 );
 
@@ -318,7 +310,6 @@ router.get(
   '/visit/:visitId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.getVisitDetailsDoctor
 );
 
@@ -331,7 +322,6 @@ router.put(
   '/visit/:visitId',
   protect,
   restrictTo('doctor'),
-  profileLimiter,
   visitController.updateVisit
 );
 

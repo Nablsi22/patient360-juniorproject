@@ -984,8 +984,8 @@ const handleRejectRequest = async () => {
     try {
       const token = localStorage.getItem('token');
       const endpoint = deactivateType === 'doctor' 
-        ? `http://localhost:5000/api/admin/doctors/${deactivateTarget._id}/deactivate`
-        : `http://localhost:5000/api/admin/patients/${deactivateTarget._id}/deactivate`;
+        ? `http://localhost:5000/api/admin/doctors/${deactivateTarget.id}/deactivate`
+        : `http://localhost:5000/api/admin/patients/${deactivateTarget.id}/deactivate`;
       
       const res = await fetch(endpoint, {
         method: 'PUT',
@@ -1029,8 +1029,8 @@ const handleRejectRequest = async () => {
     try {
       const token = localStorage.getItem('token');
       const endpoint = type === 'doctor' 
-        ? `http://localhost:5000/api/admin/doctors/${target._id}/reactivate`
-        : `http://localhost:5000/api/admin/patients/${target._id}/reactivate`;
+        ? `http://localhost:5000/api/admin/doctors/${target.id}/reactivate`
+        : `http://localhost:5000/api/admin/patients/${target.id}/reactivate`;
       
       const res = await fetch(endpoint, {
         method: 'PUT',
@@ -1552,7 +1552,7 @@ const handleRejectRequest = async () => {
                       {filteredDoctors.map((doctor) => {
                         const specInfo = getSpecializationInfo(doctor.specialization);
                         return (
-                          <tr key={doctor._id} className={doctor.isActive === false ? 'inactive-row' : ''}>
+                          <tr key={doctor.id} className={doctor.isActive === false ? 'inactive-row' : ''}>
                             <td>
                               <div className="name-cell-pro">
                                 <span className="full-name-pro">{doctor.firstName} {doctor.lastName}</span>
@@ -1692,7 +1692,7 @@ const handleRejectRequest = async () => {
                     </thead>
                     <tbody>
                       {filteredPatients.map((patient) => (
-                        <tr key={patient._id} className={patient.isActive === false ? 'inactive-row' : ''}>
+                        <tr key={patient.id} className={patient.isActive === false ? 'inactive-row' : ''}>
                           <td>
                             <div className="name-cell-pro">
                               <span className="full-name-pro">{patient.firstName} {patient.lastName}</span>

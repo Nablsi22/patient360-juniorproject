@@ -10,11 +10,6 @@ const medicationController = require('../controllers/medicationController');
 // Import middleware
 const { protect, restrictTo, verifyPatientOwnership } = require('../middleware/auth');
 const { auditLog } = require('../middleware/auditLog');
-const { 
-  profileLimiter, 
-  visitsLimiter, 
-  medicationsLimiter 
-} = require('../middleware/rateLimiter');
 
 /**
  * ALL ROUTES REQUIRE:
@@ -22,7 +17,6 @@ const {
  * 2. Patient role only (restrictTo('patient'))
  * 3. Ownership verification (verifyPatientOwnership)
  * 4. Audit logging
- * 5. Rate limiting
  */
 
 // ==========================================
@@ -39,7 +33,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  profileLimiter,
   auditLog('PATIENT_PROFILE'),
   patientController.getProfile
 );
@@ -54,7 +47,6 @@ router.put(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  profileLimiter,
   auditLog('PATIENT_PROFILE'),
   patientController.updateProfile
 );
@@ -69,7 +61,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  profileLimiter,
   auditLog('MEDICAL_HISTORY'),
   patientController.getMedicalHistory
 );
@@ -89,7 +80,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  visitsLimiter,
   auditLog('VISIT'),
   visitController.getVisitStats
 );
@@ -104,7 +94,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  visitsLimiter,
   auditLog('VISIT'),
   visitController.getVisitsByDoctor
 );
@@ -120,7 +109,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  visitsLimiter,
   auditLog('VISIT'),
   visitController.getVisits
 );
@@ -135,7 +123,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  visitsLimiter,
   auditLog('VISIT'),
   visitController.getVisitDetails
 );
@@ -155,7 +142,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  medicationsLimiter,
   auditLog('MEDICATION'),
   medicationController.getMedicationSchedule
 );
@@ -171,7 +157,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  medicationsLimiter,
   auditLog('MEDICATION'),
   medicationController.getMedicationHistory
 );
@@ -186,7 +171,6 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  medicationsLimiter,
   auditLog('MEDICATION'),
   medicationController.checkInteractions
 );
@@ -201,13 +185,12 @@ router.get(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  medicationsLimiter,
   auditLog('MEDICATION'),
   medicationController.getCurrentMedications
 );
 
 // ==========================================
-// ✨ NEW: AI SYMPTOM ANALYSIS ROUTE ✨
+// AI SYMPTOM ANALYSIS ROUTE
 // ==========================================
 
 /**
@@ -220,7 +203,6 @@ router.post(
   protect,
   restrictTo('patient'),
   verifyPatientOwnership,
-  profileLimiter,
   auditLog('PATIENT_PROFILE'),
   async (req, res) => {
     try {
@@ -234,7 +216,7 @@ router.post(
         });
       }
 
-      console.log('📝 Patient symptoms:', symptoms);
+      console.log('🔍 Patient symptoms:', symptoms);
       console.log('🤖 Calling AI service...');
       
       // Call AI service (FastAPI running on port 8000)
