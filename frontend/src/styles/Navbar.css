@@ -1,258 +1,842 @@
-@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Inter:wght@400;500;600;700;800;900&display=swap');
+/* ═══════════════════════════════════════════════════════════════════
+   PATIENT 360° — Navbar Stylesheet
+   Design System: Teal Medica
+   ═══════════════════════════════════════════════════════════════════ */
 
-* {
+@import url('https://fonts.googleapis.com/css2?family=Cairo:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap');
+
+/* ── Design Tokens ─────────────────────────────────────────────── */
+:root {
+  /* Teal Medica Palette */
+  --p360-primary: #0D3B3E;
+  --p360-primary-light: #154F53;
+  --p360-action: #00897B;
+  --p360-action-hover: #00796B;
+  --p360-action-light: #00897B1A;
+  --p360-accent: #4DB6AC;
+  --p360-accent-glow: #4DB6AC40;
+  --p360-surface: #E0F2F1;
+  --p360-surface-dim: #B2DFDB;
+  --p360-background: #F5FAFA;
+
+  /* Neutrals */
+  --p360-white: #FFFFFF;
+  --p360-white-90: rgba(255, 255, 255, 0.92);
+  --p360-white-70: rgba(255, 255, 255, 0.7);
+  --p360-white-50: rgba(255, 255, 255, 0.5);
+  --p360-white-15: rgba(255, 255, 255, 0.12);
+  --p360-white-08: rgba(255, 255, 255, 0.06);
+  --p360-dark: #0A2E31;
+  --p360-text-primary: #0D3B3E;
+  --p360-text-secondary: #5A7D80;
+
+  /* Layout */
+  --p360-nav-height: 72px;
+  --p360-nav-height-scrolled: 60px;
+
+  /* Typography */
+  --p360-font-ar: 'Cairo', sans-serif;
+  --p360-font-en: 'Plus Jakarta Sans', sans-serif;
+
+  /* Motion */
+  --p360-ease: cubic-bezier(0.4, 0, 0.2, 1);
+  --p360-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --p360-duration: 0.3s;
+  --p360-duration-fast: 0.18s;
+
+  /* Depth */
+  --p360-shadow-sm: 0 1px 3px rgba(13, 59, 62, 0.08);
+  --p360-shadow-md: 0 4px 20px rgba(13, 59, 62, 0.12);
+  --p360-shadow-lg: 0 8px 40px rgba(13, 59, 62, 0.16);
+  --p360-shadow-glow: 0 0 20px rgba(77, 182, 172, 0.15);
+
+  /* Radius */
+  --p360-radius-sm: 8px;
+  --p360-radius-md: 12px;
+  --p360-radius-lg: 16px;
+  --p360-radius-full: 9999px;
+}
+
+/* ── Reset ─────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
   box-sizing: border-box;
   margin: 0;
   padding: 0;
 }
 
 body {
-  font-family: 'Cairo', sans-serif;
-  margin: 0;
-  background-color: #ffffff;
-  color: #125c7a;
+  font-family: var(--p360-font-ar);
+  color: var(--p360-text-primary);
   overflow-x: hidden;
   direction: rtl;
+  margin: 0;
+  padding: 0;
 }
 
-.navbar {
-  background: #125c7a;
-  backdrop-filter: blur(20px);
-  border-bottom: 1px solid rgba(162, 63, 151, 0.1);
-  width: 100%;
+/* ═══════════════════════════════════════════════════════════════════
+   NAVBAR — Main Container
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-navbar {
   position: fixed;
   top: 0;
   left: 0;
   right: 0;
   z-index: 1000;
-  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  height: var(--p360-nav-height);
+  background: linear-gradient(135deg, var(--p360-primary) 0%, var(--p360-primary-light) 50%, var(--p360-primary) 100%);
+  transition:
+    height var(--p360-duration) var(--p360-ease),
+    background var(--p360-duration) var(--p360-ease),
+    box-shadow var(--p360-duration) var(--p360-ease);
 }
 
-.navbar.scrolled {
-  background: rgba(18, 92, 122, 0.98);
-  box-shadow: 0 4px 30px rgba(162, 63, 151, 0.1);
+.p360-navbar--scrolled {
+  height: var(--p360-nav-height-scrolled);
+  background: linear-gradient(135deg, rgba(13, 59, 62, 0.97) 0%, rgba(21, 79, 83, 0.97) 100%);
+  backdrop-filter: blur(20px) saturate(180%);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: var(--p360-shadow-lg), 0 1px 0 rgba(77, 182, 172, 0.1);
 }
 
-.navbar-container {
-  max-width: 100%;
-  margin: 0;
-  padding: 0;
+/* ── Accent Line ───────────────────────────────────────────────── */
+.p360-navbar-accent {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    var(--p360-accent) 20%,
+    var(--p360-action) 50%,
+    var(--p360-accent) 80%,
+    transparent 100%
+  );
+  opacity: 0.5;
+  transition: opacity var(--p360-duration) var(--p360-ease);
+}
+
+.p360-navbar--scrolled .p360-navbar-accent {
+  opacity: 0.8;
+}
+
+/* ── Inner Container ───────────────────────────────────────────── */
+.p360-navbar-container {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  height: 70px;
+  height: 100%;
+  max-width: 100%;
+  padding: 0 clamp(20px, 3vw, 60px);
   direction: ltr;
 }
 
-.navbar-left-section {
+/* ═══════════════════════════════════════════════════════════════════
+   LOGO SECTION
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-navbar-brand {
   display: flex;
   align-items: center;
-  padding-left: 60px;
-  transition: transform 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+  flex-shrink: 0;
 }
 
-/* Simple left shift when scrolled */
-.navbar.scrolled .navbar-left-section {
-  transform: translateX(-40px);
-}
-
-.heart-pulse-container {
-  width: 50px;
-  height: 25px;
-  margin-right: 12px;
+.p360-logo-btn {
   display: flex;
   align-items: center;
-  overflow: visible;
+  gap: 12px;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 6px 8px;
+  border-radius: var(--p360-radius-sm);
+  transition: all var(--p360-duration-fast) var(--p360-ease);
+  text-decoration: none;
+  outline: none;
 }
 
-.heart-pulse-svg {
+.p360-logo-btn:hover {
+  background: var(--p360-white-08);
+}
+
+.p360-logo-btn:focus-visible {
+  outline: 2px solid var(--p360-accent);
+  outline-offset: 2px;
+}
+
+/* ── Logo Icon ─────────────────────────────────────────────────── */
+.p360-logo-icon {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  transition: transform var(--p360-duration) var(--p360-ease);
+}
+
+.p360-navbar--scrolled .p360-logo-icon {
+  width: 34px;
+  height: 34px;
+}
+
+.p360-logo-icon svg {
   width: 100%;
   height: 100%;
-  overflow: visible;
 }
 
-.pulse-line {
-  stroke-dasharray: 120;
-  stroke-dashoffset: 120;
-  animation: drawPulse 2.5s ease-in-out infinite;
+/* Pulse animation on the logo SVG path */
+.p360-pulse-path {
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: p360PulseDraw 3s ease-in-out infinite;
 }
 
-.pulse-dot {
-  animation: moveDot 2.5s ease-in-out infinite;
-  filter: drop-shadow(0 0 3px rgba(162, 63, 151, 0.5));
-}
-
-@keyframes drawPulse {
-  0% { stroke-dashoffset: 120; opacity: 0.3; }
-  40% { stroke-dashoffset: 0; opacity: 1; }
-  100% { stroke-dashoffset: -120; opacity: 0.3; }
-}
-
-@keyframes moveDot {
-  0% { cx: 2; opacity: 0; }
-  10% { opacity: 1; }
-  90% { opacity: 1; }
-  100% { cx: 48; opacity: 0; }
-}
-
-.brand-text {
-  color: white;
-  font-family: 'Inter', sans-serif;
-  font-size: 1.6rem;
-  font-weight: 800;
-  letter-spacing: -0.5px;
-  text-transform: uppercase;
-  display: inline-flex;
-  align-items: baseline;
-}
-
-.degree-symbol {
-  font-size: 0.7em;
-  vertical-align: super;
-  margin-left: 2px;
-  animation: flash 1.5s ease-in-out infinite;
-}
-
-@keyframes flash {
-  0%, 100% {
+@keyframes p360PulseDraw {
+  0% {
+    stroke-dashoffset: 100;
+    opacity: 0;
+  }
+  20% {
     opacity: 1;
   }
   50% {
+    stroke-dashoffset: 0;
+    opacity: 1;
+  }
+  80% {
+    opacity: 1;
+  }
+  100% {
+    stroke-dashoffset: -100;
     opacity: 0;
   }
 }
 
-.navbar-right-section {
+/* ── Logo Text ─────────────────────────────────────────────────── */
+.p360-logo-text {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  line-height: 1;
+}
+
+.p360-logo-name {
+  color: var(--p360-white);
+  font-family: var(--p360-font-en);
+  font-size: 1.35rem;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  text-transform: uppercase;
+  display: inline-flex;
+  align-items: baseline;
+  transition: font-size var(--p360-duration) var(--p360-ease);
+}
+
+.p360-navbar--scrolled .p360-logo-name {
+  font-size: 1.15rem;
+}
+
+.p360-logo-degree {
+  font-size: 0.65em;
+  vertical-align: super;
+  margin-left: 1px;
+  color: var(--p360-accent);
+  animation: p360DegreePulse 2.5s ease-in-out infinite;
+}
+
+@keyframes p360DegreePulse {
+  0%, 100% {
+    opacity: 1;
+    text-shadow: 0 0 0 transparent;
+  }
+  50% {
+    opacity: 0.6;
+    text-shadow: 0 0 8px var(--p360-accent-glow);
+  }
+}
+
+.p360-logo-tagline {
+  color: var(--p360-accent);
+  font-family: var(--p360-font-ar);
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  margin-top: 2px;
+  opacity: 0.85;
+  transition: opacity var(--p360-duration) var(--p360-ease);
+}
+
+.p360-navbar--scrolled .p360-logo-tagline {
+  opacity: 0;
+  font-size: 0;
+  margin: 0;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   NAVIGATION SECTION (RIGHT)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-navbar-nav {
   display: flex;
   align-items: center;
-  gap: 8px;
   direction: rtl;
-  padding-right: 40px;
 }
 
-.nav-item {
-  position: relative;
-}
-
-.nav-button {
+.p360-guest-section,
+.p360-auth-section {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 10px 16px;
-  background: transparent;
-  color: rgba(255, 255, 255, 0.85);
+}
+
+.p360-nav-item {
+  position: relative;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   BUTTONS
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   border: none;
-  border-radius: 6px;
-  font-size: 0.95rem;
-  font-weight: 500;
-  font-family: 'Cairo', sans-serif;
   cursor: pointer;
-  transition: all 0.2s ease;
-}
-
-.nav-button:hover {
-  background: rgba(255, 255, 255, 0.05);
-  color: white;
-}
-
-.nav-button.active {
-  background: rgba(162, 63, 151, 0.1);
-  color: #a23f97;
-}
-
-.login-nav-button {
-  background: #a23f97;
-  color: white;
-  border: none;
+  font-family: var(--p360-font-ar);
   font-weight: 600;
-  padding: 10px 20px;
+  font-size: 0.9rem;
+  line-height: 1;
+  white-space: nowrap;
+  text-decoration: none;
+  outline: none;
+  transition: all var(--p360-duration-fast) var(--p360-ease);
 }
 
-.login-nav-button:hover {
-  background: #8a3582;
+.p360-btn:focus-visible {
+  outline: 2px solid var(--p360-accent);
+  outline-offset: 2px;
+}
+
+/* ── Nav Button (Dropdown Triggers) ──── */
+.p360-btn--nav {
+  padding: 8px 14px;
+  background: transparent;
+  color: var(--p360-white-90);
+  border-radius: var(--p360-radius-sm);
+}
+
+.p360-btn--nav:hover {
+  background: var(--p360-white-08);
+  color: var(--p360-white);
+}
+
+.p360-btn--nav.p360-btn--active {
+  background: var(--p360-white-15);
+  color: var(--p360-accent);
+}
+
+/* ── Login Button ──────────────────── */
+.p360-btn--login {
+  padding: 9px 22px;
+  background: linear-gradient(135deg, var(--p360-action) 0%, var(--p360-accent) 100%);
+  color: var(--p360-white);
+  border-radius: var(--p360-radius-full);
+  font-weight: 700;
+  font-size: 0.88rem;
+  box-shadow: 0 2px 12px rgba(0, 137, 123, 0.3);
+  position: relative;
+  overflow: hidden;
+}
+
+.p360-btn--login::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(135deg, rgba(255,255,255,0.15) 0%, transparent 50%);
+  opacity: 0;
+  transition: opacity var(--p360-duration-fast) var(--p360-ease);
+}
+
+.p360-btn--login:hover {
   transform: translateY(-1px);
+  box-shadow: 0 4px 20px rgba(0, 137, 123, 0.4), var(--p360-shadow-glow);
 }
 
-.dropdown-arrow {
-  width: 12px;
-  height: 12px;
-  transition: transform 0.2s ease;
-  stroke-width: 2.5;
+.p360-btn--login:hover::before {
+  opacity: 1;
 }
 
-.dropdown-arrow.rotated {
+.p360-btn--login:active {
+  transform: translateY(0);
+}
+
+/* ── Logout Button ─────────────────── */
+.p360-btn--logout {
+  padding: 8px 18px;
+  background: var(--p360-white-08);
+  color: var(--p360-white-90);
+  border-radius: var(--p360-radius-full);
+  border: 1px solid var(--p360-white-15);
+}
+
+.p360-btn--logout:hover {
+  background: rgba(239, 83, 80, 0.12);
+  border-color: rgba(239, 83, 80, 0.3);
+  color: #EF5350;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   CHEVRON
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-chevron {
+  transition: transform var(--p360-duration-fast) var(--p360-ease-spring);
+  flex-shrink: 0;
+}
+
+.p360-chevron--open {
   transform: rotate(180deg);
 }
 
-.dropdown-menu {
-  position: absolute;
-  top: calc(100% + 8px);
-  right: 0;
-  background: white;
-  border: 1px solid rgba(18, 92, 122, 0.1);
-  border-radius: 8px;
-  box-shadow: 0 10px 40px rgba(0, 0, 0, 0.1);
-  min-width: 200px;
-  padding: 6px;
-  animation: dropdownFade 0.2s ease;
-  z-index: 1001;
-}
+/* ═══════════════════════════════════════════════════════════════════
+   USER BADGE (Authenticated)
+   ═══════════════════════════════════════════════════════════════════ */
 
-@keyframes dropdownFade {
-  from { opacity: 0; transform: translateY(-4px); }
-  to { opacity: 1; transform: translateY(0); }
-}
-
-.dropdown-item {
+.p360-user-badge {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 14px;
-  color: #125c7a;
-  text-decoration: none;
-  border-radius: 6px;
-  font-size: 0.92rem;
+  padding: 6px 14px 6px 8px;
+  background: var(--p360-white-08);
+  border: 1px solid var(--p360-white-15);
+  border-radius: var(--p360-radius-full);
+}
+
+.p360-user-avatar {
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--p360-action), var(--p360-accent));
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--p360-white);
+  flex-shrink: 0;
+}
+
+.p360-user-details {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.1;
+  direction: rtl;
+}
+
+.p360-user-greeting {
+  font-size: 0.65rem;
+  color: var(--p360-accent);
   font-weight: 500;
-  font-family: 'Cairo', sans-serif;
-  transition: all 0.15s ease;
 }
 
-.dropdown-item:hover {
-  background: rgba(18, 92, 122, 0.08);
-  color: #125c7a;
+.p360-user-name {
+  font-size: 0.85rem;
+  color: var(--p360-white);
+  font-weight: 700;
 }
 
-.dropdown-item.active-lang {
-  background: rgba(162, 63, 151, 0.1);
-  color: #a23f97;
-}
+/* ═══════════════════════════════════════════════════════════════════
+   DROPDOWN MENUS
+   ═══════════════════════════════════════════════════════════════════ */
 
-.dropdown-backdrop {
-  position: fixed;
-  top: 0;
-  left: 0;
+.p360-dropdown-menu {
+  position: absolute;
+  top: calc(100% + 10px);
   right: 0;
-  bottom: 0;
+  z-index: 1001;
+  min-width: 220px;
+  animation: p360DropdownIn 0.25s var(--p360-ease-spring) forwards;
+}
+
+@keyframes p360DropdownIn {
+  from {
+    opacity: 0;
+    transform: translateY(-8px) scale(0.96);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.p360-dropdown-inner {
+  background: var(--p360-white);
+  border: 1px solid rgba(13, 59, 62, 0.08);
+  border-radius: var(--p360-radius-md);
+  box-shadow: var(--p360-shadow-lg), 0 0 0 1px rgba(13, 59, 62, 0.04);
+  padding: 6px;
+  overflow: hidden;
+}
+
+/* ── Dropdown Items ────────────────────────────────────────────── */
+.p360-dropdown-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  color: var(--p360-text-primary);
+  text-decoration: none;
+  border-radius: var(--p360-radius-sm);
+  font-size: 0.88rem;
+  font-weight: 600;
+  font-family: var(--p360-font-ar);
+  cursor: pointer;
+  transition: all var(--p360-duration-fast) var(--p360-ease);
+  direction: rtl;
+  animation: p360ItemSlide 0.25s var(--p360-ease) forwards;
+  opacity: 0;
+}
+
+@keyframes p360ItemSlide {
+  from {
+    opacity: 0;
+    transform: translateX(8px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+.p360-dropdown-item:hover {
+  background: var(--p360-surface);
+  color: var(--p360-action);
+}
+
+.p360-dropdown-item:active {
+  background: var(--p360-surface-dim);
+}
+
+.p360-dropdown-item-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  background: var(--p360-surface);
+  border-radius: var(--p360-radius-sm);
+  color: var(--p360-action);
+  flex-shrink: 0;
+  transition: all var(--p360-duration-fast) var(--p360-ease);
+}
+
+.p360-dropdown-item:hover .p360-dropdown-item-icon {
+  background: var(--p360-action-light);
+  color: var(--p360-action);
+  transform: scale(1.05);
+}
+
+.p360-dropdown-item-label {
+  flex: 1;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   OVERLAY (Backdrop)
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-overlay {
+  position: fixed;
+  inset: 0;
   z-index: 999;
   background: transparent;
 }
 
-@media (max-width: 768px) {
-  .navbar-left-section {
-    padding-left: 20px;
+/* ═══════════════════════════════════════════════════════════════════
+   THEME TOGGLE BUTTON — Inline in Navbar
+   ═══════════════════════════════════════════════════════════════════ */
+
+.p360-theme-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 1.5px solid var(--p360-white-15);
+  border-radius: 50%;
+  background: var(--p360-white-08);
+  color: var(--p360-white-90);
+  cursor: pointer;
+  outline: none;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+  transition:
+    background var(--p360-duration) var(--p360-ease),
+    border-color var(--p360-duration) var(--p360-ease),
+    color var(--p360-duration) var(--p360-ease),
+    transform var(--p360-duration-fast) var(--p360-ease-spring),
+    box-shadow var(--p360-duration) var(--p360-ease);
+}
+
+.p360-theme-btn:hover {
+  background: var(--p360-white-15);
+  border-color: var(--p360-accent);
+  transform: scale(1.1);
+  box-shadow: 0 0 16px rgba(77, 182, 172, 0.2);
+}
+
+.p360-theme-btn:active {
+  transform: scale(0.92);
+}
+
+.p360-theme-btn:focus-visible {
+  outline: 2px solid var(--p360-accent);
+  outline-offset: 2px;
+}
+
+/* Dark mode active state — warm glow */
+.p360-theme-btn--dark {
+  border-color: rgba(255, 213, 79, 0.25);
+  background: rgba(255, 213, 79, 0.08);
+}
+
+.p360-theme-btn--dark:hover {
+  background: rgba(255, 213, 79, 0.15);
+  border-color: rgba(255, 213, 79, 0.5);
+  box-shadow: 0 0 16px rgba(255, 213, 79, 0.15);
+}
+
+/* ── Icon Container — Clip & Animate ────────────────────────────── */
+.p360-theme-btn__icons {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  position: relative;
+}
+
+/* Both SVGs stacked, one visible at a time */
+.p360-theme-btn__moon,
+.p360-theme-btn__sun {
+  position: absolute;
+  width: 18px;
+  height: 18px;
+  stroke: currentColor;
+  fill: none;
+  transition:
+    opacity 0.35s var(--p360-ease),
+    transform 0.45s var(--p360-ease-spring);
+}
+
+/* Light mode: moon visible, sun hidden */
+.p360-theme-btn__moon {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+}
+
+.p360-theme-btn__sun {
+  opacity: 0;
+  transform: rotate(-60deg) scale(0.5);
+}
+
+/* Dark mode: sun visible, moon hidden */
+.p360-theme-btn__icons--dark .p360-theme-btn__moon {
+  opacity: 0;
+  transform: rotate(30deg) scale(0.5);
+}
+
+.p360-theme-btn__icons--dark .p360-theme-btn__sun {
+  opacity: 1;
+  transform: rotate(0deg) scale(1);
+  stroke: #FFD54F;
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   DARK MODE — Navbar Overrides
+   ═══════════════════════════════════════════════════════════════════ */
+
+[data-theme="dark"] .p360-navbar {
+  background: linear-gradient(135deg, #0A1A1B 0%, #0F2426 50%, #0A1A1B 100%);
+}
+
+[data-theme="dark"] .p360-navbar--scrolled {
+  background: linear-gradient(135deg, rgba(10, 26, 27, 0.97) 0%, rgba(15, 36, 38, 0.97) 100%);
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.3),
+    0 1px 0 rgba(77, 182, 172, 0.08);
+}
+
+[data-theme="dark"] .p360-navbar-accent {
+  opacity: 0.35;
+}
+
+[data-theme="dark"] .p360-navbar--scrolled .p360-navbar-accent {
+  opacity: 0.6;
+}
+
+/* Dropdown — dark mode */
+[data-theme="dark"] .p360-dropdown-inner {
+  background: #162626;
+  border-color: rgba(77, 182, 172, 0.1);
+  box-shadow:
+    0 8px 40px rgba(0, 0, 0, 0.4),
+    0 0 0 1px rgba(77, 182, 172, 0.06);
+}
+
+[data-theme="dark"] .p360-dropdown-item {
+  color: #E0F2F1;
+}
+
+[data-theme="dark"] .p360-dropdown-item:hover {
+  background: rgba(77, 182, 172, 0.08);
+  color: #4DB6AC;
+}
+
+[data-theme="dark"] .p360-dropdown-item:active {
+  background: rgba(77, 182, 172, 0.12);
+}
+
+[data-theme="dark"] .p360-dropdown-item-icon {
+  background: rgba(77, 182, 172, 0.1);
+  color: #4DB6AC;
+}
+
+[data-theme="dark"] .p360-dropdown-item:hover .p360-dropdown-item-icon {
+  background: rgba(77, 182, 172, 0.18);
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   RESPONSIVE — Tablet & Mobile
+   ═══════════════════════════════════════════════════════════════════ */
+
+@media (max-width: 992px) {
+  .p360-navbar-container {
+    padding: 0 20px;
   }
-  
-  .navbar.scrolled .navbar-left-section {
-    transform: translateX(-20px);
+
+  .p360-logo-tagline {
+    display: none;
   }
-  
-  .navbar-right-section {
-    padding-right: 20px;
+
+  .p360-logo-name {
+    font-size: 1.15rem;
+  }
+
+  .p360-navbar--scrolled .p360-logo-name {
+    font-size: 1.05rem;
+  }
+
+  .p360-btn--nav {
+    padding: 8px 10px;
+    font-size: 0.85rem;
+  }
+
+  .p360-btn--login {
+    padding: 8px 16px;
+    font-size: 0.85rem;
+  }
+
+  .p360-user-details {
+    display: none;
+  }
+
+  .p360-user-badge {
+    padding: 4px;
+    border-radius: 50%;
+  }
+
+  .p360-theme-btn {
+    width: 34px;
+    height: 34px;
+  }
+}
+
+@media (max-width: 640px) {
+  :root {
+    --p360-nav-height: 60px;
+    --p360-nav-height-scrolled: 54px;
+  }
+
+  .p360-navbar-container {
+    padding: 0 12px;
+  }
+
+  .p360-logo-icon {
+    width: 32px;
+    height: 32px;
+  }
+
+  .p360-logo-name {
+    font-size: 1rem;
+  }
+
+  .p360-guest-section,
+  .p360-auth-section {
     gap: 4px;
   }
-  
-  .nav-button {
-    padding: 8px 12px;
-    font-size: 0.9rem;
+
+  .p360-btn--nav span:not(.p360-chevron) {
+    font-size: 0.82rem;
+  }
+
+  .p360-btn--login span {
+    display: none;
+  }
+
+  .p360-btn--login {
+    padding: 8px;
+    border-radius: 50%;
+  }
+
+  .p360-btn--logout span {
+    display: none;
+  }
+
+  .p360-btn--logout {
+    padding: 8px;
+    border-radius: 50%;
+  }
+
+  .p360-dropdown-menu {
+    right: -10px;
+    min-width: 200px;
+  }
+
+  .p360-theme-btn {
+    width: 32px;
+    height: 32px;
+  }
+
+  .p360-theme-btn__moon,
+  .p360-theme-btn__sun {
+    width: 16px;
+    height: 16px;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   ACCESSIBILITY — Reduced Motion
+   ═══════════════════════════════════════════════════════════════════ */
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   PRINT — Hide Navbar
+   ═══════════════════════════════════════════════════════════════════ */
+
+@media print {
+  .p360-navbar {
+    display: none;
   }
 }

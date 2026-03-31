@@ -5,6 +5,7 @@ import React, { useEffect, useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
+import { useTheme } from '../context/ThemeProvider';
 import '../styles/PatientDashboard.css';
 
 /**
@@ -17,55 +18,100 @@ const AI_SERVICE_CONFIG = {
 };
 
 /**
- * MAP AI RESPONSE TO SPECIALIZATIONS
+ * MAP AI RESPONSE TO DB SPECIALIZATIONS
+ * Keys = AI model output names → Values = doctors.specialization DB enum
+ */
+/**
+ * BOOKING SPECIALIZATIONS — for appointment booking wizard
+ * id must match doctors.specialization DB enum exactly
+ */
+const BOOKING_SPECIALIZATIONS = [
+  { id: 'cardiology', nameAr: 'طب القلب', icon: '❤️' },
+  { id: 'pulmonology', nameAr: 'طب الرئة', icon: '🫁' },
+  { id: 'general_practice', nameAr: 'طب عام', icon: '🩺' },
+  { id: 'orthopedics', nameAr: 'جراحة العظام', icon: '🦿' },
+  { id: 'neurology', nameAr: 'طب الأعصاب', icon: '🧠' },
+  { id: 'endocrinology', nameAr: 'طب الغدد الصماء', icon: '⚗️' },
+  { id: 'dermatology', nameAr: 'طب الجلدية', icon: '🧴' },
+  { id: 'gastroenterology', nameAr: 'الجهاز الهضمي', icon: '🫃' },
+  { id: 'surgery', nameAr: 'الجراحة العامة', icon: '🔪' },
+  { id: 'urology', nameAr: 'المسالك البولية', icon: '💧' },
+  { id: 'gynecology', nameAr: 'النساء والتوليد', icon: '🤰' },
+  { id: 'psychiatry', nameAr: 'الطب النفسي', icon: '🧘' },
+  { id: 'hematology', nameAr: 'طب الدم', icon: '🩸' },
+  { id: 'oncology', nameAr: 'طب الأورام', icon: '🎗️' },
+  { id: 'otolaryngology', nameAr: 'أنف أذن حنجرة', icon: '👂' },
+  { id: 'ophthalmology', nameAr: 'طب العيون', icon: '👁️' },
+  { id: 'pediatrics', nameAr: 'طب الأطفال', icon: '👶' },
+  { id: 'nephrology', nameAr: 'طب الكلى', icon: '🫘' },
+  { id: 'internal_medicine', nameAr: 'الطب الباطني', icon: '🏨' },
+  { id: 'emergency_medicine', nameAr: 'طب الطوارئ', icon: '🚑' },
+  { id: 'rheumatology', nameAr: 'طب الروماتيزم', icon: '🦴' },
+  { id: 'vascular_surgery', nameAr: 'جراحة الأوعية', icon: '🫀' },
+  { id: 'anesthesiology', nameAr: 'طب التخدير', icon: '💉' },
+  { id: 'radiology', nameAr: 'الأشعة التشخيصية', icon: '📡' }
+];
+
+/**
+ * MAP AI RESPONSE TO DB SPECIALIZATIONS
+ * Keys = AI model output names → Values = doctors.specialization DB enum
  */
 const SPECIALIZATION_MAPPING = {
-  'Cardiologist': 'cardiologist',
-  'Pulmonologist': 'pulmonologist',
-  'General Practitioner': 'general_practitioner',
-  'Infectious Disease Specialist': 'infectious_disease',
-  'Intensive Care Specialist': 'intensive_care',
-  'Rheumatologist': 'rheumatologist',
-  'Orthopedic Surgeon': 'orthopedic_surgeon',
-  'Neurologist': 'neurologist',
-  'Endocrinologist': 'endocrinologist',
-  'Dermatologist': 'dermatologist',
-  'Gastroenterologist': 'gastroenterologist',
-  'General Surgeon': 'general_surgeon',
-  'Hepatologist': 'hepatologist',
-  'Urologist': 'urologist',
-  'Gynecologist': 'gynecologist',
-  'Psychiatrist': 'psychiatrist',
-  'Hematologist': 'hematologist',
-  'Hematologist/Oncologist': 'hematologist_oncologist',
-  'ENT Specialist': 'ent_specialist',
-  'Ophthalmologist': 'ophthalmologist'
+  'Cardiologist': 'cardiology',
+  'Pulmonologist': 'pulmonology',
+  'General Practitioner': 'general_practice',
+  'Rheumatologist': 'rheumatology',
+  'Orthopedic Surgeon': 'orthopedics',
+  'Neurologist': 'neurology',
+  'Endocrinologist': 'endocrinology',
+  'Dermatologist': 'dermatology',
+  'Gastroenterologist': 'gastroenterology',
+  'General Surgeon': 'surgery',
+  'Urologist': 'urology',
+  'Gynecologist': 'gynecology',
+  'Psychiatrist': 'psychiatry',
+  'Hematologist': 'hematology',
+  'Hematologist/Oncologist': 'oncology',
+  'Oncologist': 'oncology',
+  'ENT Specialist': 'otolaryngology',
+  'Ophthalmologist': 'ophthalmology',
+  'Pediatrician': 'pediatrics',
+  'Nephrologist': 'nephrology',
+  'Internal Medicine': 'internal_medicine',
+  'Emergency Medicine': 'emergency_medicine',
+  'Anesthesiologist': 'anesthesiology',
+  'Radiologist': 'radiology',
+  'Vascular Surgeon': 'vascular_surgery'
 };
 
 /**
- * ALL 20 MEDICAL SPECIALIZATIONS
+ * ALL 24 MEDICAL SPECIALIZATIONS — matches doctors.specialization DB enum
  */
 const MEDICAL_SPECIALIZATIONS = [
-  { id: 'cardiologist', nameEn: 'Cardiologist', nameAr: 'طبيب قلب', icon: '❤️', color: '#ef4444', description: 'متخصص في تشخيص وعلاج أمراض القلب والأوعية الدموية' },
-  { id: 'pulmonologist', nameEn: 'Pulmonologist', nameAr: 'طبيب أمراض الرئة', icon: '🫁', color: '#3b82f6', description: 'متخصص في أمراض الجهاز التنفسي والرئتين' },
-  { id: 'general_practitioner', nameEn: 'General Practitioner', nameAr: 'طبيب عام', icon: '🩺', color: '#10b981', description: 'طبيب للفحص الشامل والتشخيص الأولي' },
-  { id: 'infectious_disease', nameEn: 'Infectious Disease Specialist', nameAr: 'طبيب أمراض معدية', icon: '🦠', color: '#f59e0b', description: 'متخصص في الأمراض المعدية والعدوى' },
-  { id: 'intensive_care', nameEn: 'Intensive Care Specialist', nameAr: 'طبيب عناية مركزة', icon: '🏥', color: '#dc2626', description: 'متخصص في رعاية الحالات الحرجة' },
-  { id: 'rheumatologist', nameEn: 'Rheumatologist', nameAr: 'طبيب روماتيزم', icon: '🦴', color: '#8b5cf6', description: 'متخصص في أمراض المفاصل والروماتيزم' },
-  { id: 'orthopedic_surgeon', nameEn: 'Orthopedic Surgeon', nameAr: 'جراح عظام', icon: '🦿', color: '#6366f1', description: 'متخصص في جراحة العظام والمفاصل' },
-  { id: 'neurologist', nameEn: 'Neurologist', nameAr: 'طبيب أعصاب', icon: '🧠', color: '#ec4899', description: 'متخصص في أمراض الجهاز العصبي' },
-  { id: 'endocrinologist', nameEn: 'Endocrinologist', nameAr: 'طبيب غدد صماء', icon: '⚗️', color: '#14b8a6', description: 'متخصص في أمراض الغدد والهرمونات' },
-  { id: 'dermatologist', nameEn: 'Dermatologist', nameAr: 'طبيب جلدية', icon: '🧴', color: '#f97316', description: 'متخصص في أمراض الجلد والشعر' },
-  { id: 'gastroenterologist', nameEn: 'Gastroenterologist', nameAr: 'طبيب جهاز هضمي', icon: '🫃', color: '#eab308', description: 'متخصص في أمراض الجهاز الهضمي' },
-  { id: 'general_surgeon', nameEn: 'General Surgeon', nameAr: 'جراح عام', icon: '🔪', color: '#64748b', description: 'متخصص في العمليات الجراحية العامة' },
-  { id: 'hepatologist', nameEn: 'Hepatologist', nameAr: 'طبيب كبد', icon: '🫀', color: '#a855f7', description: 'متخصص في أمراض الكبد والمرارة' },
-  { id: 'urologist', nameEn: 'Urologist', nameAr: 'طبيب مسالك بولية', icon: '💧', color: '#0ea5e9', description: 'متخصص في أمراض الكلى والمسالك البولية' },
-  { id: 'gynecologist', nameEn: 'Gynecologist', nameAr: 'طبيب نساء وتوليد', icon: '🤰', color: '#db2777', description: 'متخصص في صحة المرأة والحمل والولادة' },
-  { id: 'psychiatrist', nameEn: 'Psychiatrist', nameAr: 'طبيب نفسي', icon: '🧘', color: '#7c3aed', description: 'متخصص في الصحة النفسية' },
-  { id: 'hematologist', nameEn: 'Hematologist', nameAr: 'طبيب دم', icon: '🩸', color: '#be123c', description: 'متخصص في أمراض الدم' },
-  { id: 'hematologist_oncologist', nameEn: 'Hematologist/Oncologist', nameAr: 'طبيب دم/أورام', icon: '🎗️', color: '#9333ea', description: 'متخصص في أمراض الدم والأورام' },
-  { id: 'ent_specialist', nameEn: 'ENT Specialist', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂', color: '#059669', description: 'متخصص في أمراض الأذن والأنف والحنجرة' },
-  { id: 'ophthalmologist', nameEn: 'Ophthalmologist', nameAr: 'طبيب عيون', icon: '👁️', color: '#0284c7', description: 'متخصص في أمراض العيون' }
+  { id: 'cardiology', nameEn: 'Cardiology', nameAr: 'طب القلب', icon: '❤️', color: 'var(--tm-error, #D32F2F)', description: 'متخصص في تشخيص وعلاج أمراض القلب والأوعية الدموية' },
+  { id: 'pulmonology', nameEn: 'Pulmonology', nameAr: 'طب الرئة', icon: '🫁', color: 'var(--tm-action, #00897B)', description: 'متخصص في أمراض الجهاز التنفسي والرئتين' },
+  { id: 'general_practice', nameEn: 'General Practice', nameAr: 'طب عام', icon: '🩺', color: 'var(--tm-success, #00897B)', description: 'طبيب للفحص الشامل والتشخيص الأولي' },
+  { id: 'rheumatology', nameEn: 'Rheumatology', nameAr: 'طب الروماتيزم', icon: '🦴', color: '#8b5cf6', description: 'متخصص في أمراض المفاصل والروماتيزم' },
+  { id: 'orthopedics', nameEn: 'Orthopedics', nameAr: 'جراحة العظام', icon: '🦿', color: '#6366f1', description: 'متخصص في جراحة العظام والمفاصل' },
+  { id: 'neurology', nameEn: 'Neurology', nameAr: 'طب الأعصاب', icon: '🧠', color: '#ec4899', description: 'متخصص في أمراض الجهاز العصبي' },
+  { id: 'endocrinology', nameEn: 'Endocrinology', nameAr: 'طب الغدد الصماء', icon: '⚗️', color: 'var(--tm-accent, #4DB6AC)', description: 'متخصص في أمراض الغدد والهرمونات' },
+  { id: 'dermatology', nameEn: 'Dermatology', nameAr: 'طب الجلدية', icon: '🧴', color: '#f97316', description: 'متخصص في أمراض الجلد والشعر' },
+  { id: 'gastroenterology', nameEn: 'Gastroenterology', nameAr: 'طب الجهاز الهضمي', icon: '🫃', color: '#eab308', description: 'متخصص في أمراض الجهاز الهضمي' },
+  { id: 'surgery', nameEn: 'Surgery', nameAr: 'الجراحة العامة', icon: '🔪', color: '#64748b', description: 'متخصص في العمليات الجراحية العامة' },
+  { id: 'urology', nameEn: 'Urology', nameAr: 'طب المسالك البولية', icon: '💧', color: '#0ea5e9', description: 'متخصص في أمراض الكلى والمسالك البولية' },
+  { id: 'gynecology', nameEn: 'Gynecology', nameAr: 'طب النساء والتوليد', icon: '🤰', color: '#db2777', description: 'متخصص في صحة المرأة والحمل والولادة' },
+  { id: 'psychiatry', nameEn: 'Psychiatry', nameAr: 'الطب النفسي', icon: '🧘', color: '#7c3aed', description: 'متخصص في الصحة النفسية' },
+  { id: 'hematology', nameEn: 'Hematology', nameAr: 'طب الدم', icon: '🩸', color: '#be123c', description: 'متخصص في أمراض الدم' },
+  { id: 'oncology', nameEn: 'Oncology', nameAr: 'طب الأورام', icon: '🎗️', color: '#9333ea', description: 'متخصص في تشخيص وعلاج الأورام' },
+  { id: 'otolaryngology', nameEn: 'Otolaryngology (ENT)', nameAr: 'أنف أذن حنجرة', icon: '👂', color: '#059669', description: 'متخصص في أمراض الأذن والأنف والحنجرة' },
+  { id: 'ophthalmology', nameEn: 'Ophthalmology', nameAr: 'طب العيون', icon: '👁️', color: '#0284c7', description: 'متخصص في أمراض العيون' },
+  { id: 'pediatrics', nameEn: 'Pediatrics', nameAr: 'طب الأطفال', icon: '👶', color: '#f472b6', description: 'متخصص في صحة الأطفال والرضع' },
+  { id: 'nephrology', nameEn: 'Nephrology', nameAr: 'طب الكلى', icon: '🫘', color: '#2563eb', description: 'متخصص في أمراض الكلى' },
+  { id: 'internal_medicine', nameEn: 'Internal Medicine', nameAr: 'الطب الباطني', icon: '🏨', color: 'var(--tm-primary, #0D3B3E)', description: 'متخصص في الأمراض الباطنية' },
+  { id: 'emergency_medicine', nameEn: 'Emergency Medicine', nameAr: 'طب الطوارئ', icon: '🚑', color: '#dc2626', description: 'متخصص في حالات الطوارئ الطبية' },
+  { id: 'vascular_surgery', nameEn: 'Vascular Surgery', nameAr: 'جراحة الأوعية', icon: '🫀', color: '#a855f7', description: 'متخصص في جراحة الأوعية الدموية' },
+  { id: 'anesthesiology', nameEn: 'Anesthesiology', nameAr: 'طب التخدير', icon: '💉', color: '#78716c', description: 'متخصص في التخدير والرعاية المحيطة بالجراحة' },
+  { id: 'radiology', nameEn: 'Radiology', nameAr: 'الأشعة التشخيصية', icon: '📡', color: '#0891b2', description: 'متخصص في التصوير الطبي والأشعة' }
 ];
 
 const consultationAPI = {
@@ -121,10 +167,10 @@ const BMIScaleIndicator = ({ bmi, weight, height }) => {
 
   const getBMICategory = (value) => {
     const b = parseFloat(value);
-    if (b < 18.5) return { label: 'نقص الوزن', labelEn: 'Underweight', color: '#3b82f6', class: 'underweight' };
-    if (b < 25) return { label: 'وزن طبيعي', labelEn: 'Normal', color: '#10b981', class: 'normal' };
-    if (b < 30) return { label: 'وزن زائد', labelEn: 'Overweight', color: '#f59e0b', class: 'overweight' };
-    return { label: 'سمنة', labelEn: 'Obese', color: '#ef4444', class: 'obese' };
+    if (b < 18.5) return { label: 'نقص الوزن', labelEn: 'Underweight', color: 'var(--tm-action, #00897B)', class: 'underweight' };
+    if (b < 25) return { label: 'وزن طبيعي', labelEn: 'Normal', color: 'var(--tm-success, #00897B)', class: 'normal' };
+    if (b < 30) return { label: 'وزن زائد', labelEn: 'Overweight', color: 'var(--tm-warning, #F57C00)', class: 'overweight' };
+    return { label: 'سمنة', labelEn: 'Obese', color: 'var(--tm-error, #D32F2F)', class: 'obese' };
   };
 
   const category = getBMICategory(bmi);
@@ -324,10 +370,10 @@ const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) 
                   <span className="info-label">التخصص:</span>
                   <span className="info-value specialization-badge">{getSpecialization()}</span>
                 </div>
-                {visit.doctorId?.institution && (
+                {visit.doctorId?.hospitalAffiliation && (
                   <div className="info-row">
                     <span className="info-label">المؤسسة:</span>
-                    <span className="info-value">{visit.doctorId.institution}</span>
+                    <span className="info-value">{visit.doctorId.hospitalAffiliation}</span>
                   </div>
                 )}
               </div>
@@ -410,13 +456,13 @@ const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) 
                     </div>
                   </div>
                 )}
-                {visit.vitalSigns.spo2 && (
+                {visit.vitalSigns.oxygenSaturation && (
                   <div className="vital-card">
                     <div className="vital-icon">🫁</div>
                     <div className="vital-info">
                       <span className="vital-label">الأكسجين</span>
                       <span className="vital-value">
-                        {visit.vitalSigns.spo2}
+                        {visit.vitalSigns.oxygenSaturation}
                         <small>%</small>
                       </span>
                     </div>
@@ -506,6 +552,19 @@ const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) 
                           <span className="detail-value">{med.duration}</span>
                         </div>
                       )}
+                      {med.route && (
+                        <div className="med-detail-item">
+                          <span className="detail-label">طريقة الاستخدام:</span>
+                          <span className="detail-value route-badge">
+                            {med.route === 'oral' ? '💊 فموي' :
+                             med.route === 'injection' ? '💉 حقن' :
+                             med.route === 'topical' ? '🧴 موضعي' :
+                             med.route === 'inhalation' ? '🫁 استنشاق' :
+                             med.route === 'sublingual' ? '👅 تحت اللسان' :
+                             med.route === 'rectal' ? 'شرجي' : med.route}
+                          </span>
+                        </div>
+                      )}
                       {med.instructions && (
                         <div className="med-detail-item full-width">
                           <span className="detail-label">التعليمات:</span>
@@ -536,16 +595,40 @@ const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) 
             </div>
           )}
 
-          {/* ECG Results if available */}
-          {visit.ecgResults && (
+          {/* ECG Analysis if available */}
+          {visit.ecgAnalysis && (
             <div className="detail-section ecg-section">
               <div className="section-header">
                 <span className="section-icon">❤️</span>
-                <h4>نتائج تخطيط القلب</h4>
-                <span className="section-badge red">ECG Results</span>
+                <h4>نتائج تخطيط القلب (ECG)</h4>
+                <span className="section-badge red">ECG Analysis</span>
               </div>
               <div className="section-content highlight-box red">
-                <pre className="ecg-results">{JSON.stringify(visit.ecgResults, null, 2)}</pre>
+                {visit.ecgAnalysis.topPrediction && (
+                  <div className="ecg-top-result">
+                    <span className="ecg-label">التشخيص الرئيسي:</span>
+                    <span className="ecg-value">{visit.ecgAnalysis.topPrediction}</span>
+                  </div>
+                )}
+                {visit.ecgAnalysis.recommendation && (
+                  <div className="ecg-recommendation">
+                    <span className="ecg-label">التوصية:</span>
+                    <p>{visit.ecgAnalysis.recommendation}</p>
+                  </div>
+                )}
+                {visit.ecgAnalysis.predictions && visit.ecgAnalysis.predictions.length > 0 && (
+                  <div className="ecg-predictions">
+                    {visit.ecgAnalysis.predictions.map((pred, idx) => (
+                      <div key={idx} className="ecg-prediction-item">
+                        <span className="pred-class">{pred.arabicLabel || pred.class}</span>
+                        <div className="pred-bar-wrapper">
+                          <div className="pred-bar" style={{ width: `${pred.confidence}%` }}></div>
+                        </div>
+                        <span className="pred-confidence">{pred.confidence?.toFixed(1)}%</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )}
@@ -557,14 +640,20 @@ const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) 
 
 const PatientDashboard = () => {
   const navigate = useNavigate();
+  const { theme } = useTheme();
   const [user, setUser] = useState(null);
   const [loading, setLoading] = useState(true);
   const [modal, setModal] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
   const [visits, setVisits] = useState([]);
   const [loadingVisits, setLoadingVisits] = useState(false);
   const [medications, setMedications] = useState([]);
-const [medicationSchedule, setMedicationSchedule] = useState(null);
-const [loadingMedications, setLoadingMedications] = useState(false);
+  const [loadingMedications, setLoadingMedications] = useState(false);
+  const [appointments, setAppointments] = useState([]);
+  const [loadingAppointments, setLoadingAppointments] = useState(false);
+  const [labResults, setLabResults] = useState([]);
+  const [loadingLabResults, setLoadingLabResults] = useState(false);
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
   const [expandedVisit, setExpandedVisit] = useState(null);
   const [activeSection, setActiveSection] = useState('overview');
   const [symptoms, setSymptoms] = useState('');
@@ -572,6 +661,18 @@ const [loadingMedications, setLoadingMedications] = useState(false);
   const [consultationResult, setConsultationResult] = useState(null);
   const [consultationError, setConsultationError] = useState(null);
   const resultRef = useRef(null);
+
+  // ── Booking Wizard State ────────────────────────────────────────
+  const [bookingStep, setBookingStep] = useState(0); // 0=closed, 1=specialization, 2=doctor, 3=slot, 4=confirm
+  const [bookingSpec, setBookingSpec] = useState('');
+  const [bookingDoctors, setBookingDoctors] = useState([]);
+  const [bookingDoctorsLoading, setBookingDoctorsLoading] = useState(false);
+  const [selectedDoctor, setSelectedDoctor] = useState(null);
+  const [doctorSlots, setDoctorSlots] = useState([]);
+  const [slotsLoading, setSlotsLoading] = useState(false);
+  const [selectedSlot, setSelectedSlot] = useState(null);
+  const [bookingReason, setBookingReason] = useState('');
+  const [bookingSubmitting, setBookingSubmitting] = useState(false);
 
   const handleAnalyzeSymptoms = async () => {
     if (!symptoms.trim()) { 
@@ -714,21 +815,10 @@ const [loadingMedications, setLoadingMedications] = useState(false);
       if (medsResponse.ok && medsData.success) {
         setMedications(medsData.medications || []);
       }
-      
-      // Load medication schedule
-      const scheduleResponse = await fetch('http://localhost:5000/api/patient/medications/schedule', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      const scheduleData = await scheduleResponse.json();
-      console.log('📅 Schedule response:', scheduleData);
-      
-      if (scheduleResponse.ok && scheduleData.success) {
-        setMedicationSchedule(scheduleData.schedule);
-      }
+  
       
       console.log('🔍 Final Medications:', medsData.medications);
-      console.log('🔍 Final Schedule:', scheduleData.schedule);
+      
 
     } catch (error) {
       console.error('❌ Error loading medications:', error);
@@ -739,6 +829,187 @@ const [loadingMedications, setLoadingMedications] = useState(false);
   
   loadMedications();
 }, [user]);
+
+  // Load Appointments
+  useEffect(() => {
+    const loadAppointments = async () => {
+      if (!user) return;
+      setLoadingAppointments(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/patient/appointments', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setAppointments(data.appointments || []);
+        }
+      } catch (error) {
+        console.error('Error loading appointments:', error);
+      } finally {
+        setLoadingAppointments(false);
+      }
+    };
+    loadAppointments();
+  }, [user]);
+
+  // Load Lab Results
+  useEffect(() => {
+    const loadLabResults = async () => {
+      if (!user) return;
+      setLoadingLabResults(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/patient/lab-results', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setLabResults(data.labTests || []);
+        }
+      } catch (error) {
+        console.error('Error loading lab results:', error);
+      } finally {
+        setLoadingLabResults(false);
+      }
+    };
+    loadLabResults();
+  }, [user]);
+
+  // Load Prescriptions
+  useEffect(() => {
+    const loadPrescriptions = async () => {
+      if (!user) return;
+      setLoadingPrescriptions(true);
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch('http://localhost:5000/api/patient/prescriptions', {
+          headers: { 'Authorization': `Bearer ${token}` }
+        });
+        const data = await response.json();
+        if (response.ok && data.success) {
+          setPrescriptions(data.prescriptions || []);
+        }
+      } catch (error) {
+        console.error('Error loading prescriptions:', error);
+      } finally {
+        setLoadingPrescriptions(false);
+      }
+    };
+    loadPrescriptions();
+  }, [user]);
+
+  // ══════════════════════════════════════════════════════════════
+  // BOOKING WIZARD — Appointment Reservation Flow
+  // ══════════════════════════════════════════════════════════════
+
+  /** Step 1 → Step 2: Select specialization → load doctors */
+  const handleSelectSpecialization = async (specId) => {
+    setBookingSpec(specId);
+    setBookingDoctors([]);
+    setSelectedDoctor(null);
+    setDoctorSlots([]);
+    setSelectedSlot(null);
+    setBookingStep(2);
+    setBookingDoctorsLoading(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:5000/api/patient/doctors?specialization=${specId}`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setBookingDoctors(data.doctors || []);
+      }
+    } catch (e) { console.error('Load doctors error:', e); }
+    finally { setBookingDoctorsLoading(false); }
+  };
+
+  /** Step 2 → Step 3: Select doctor → load available slots */
+  const handleSelectDoctor = async (doctor) => {
+    setSelectedDoctor(doctor);
+    setDoctorSlots([]);
+    setSelectedSlot(null);
+    setBookingStep(3);
+    setSlotsLoading(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch(`http://localhost:5000/api/patient/doctors/${doctor._id}/slots`, {
+        headers: { 'Authorization': `Bearer ${token}` }
+      });
+      const data = await res.json();
+      if (res.ok && data.success) {
+        setDoctorSlots(data.slots || []);
+      }
+    } catch (e) { console.error('Load slots error:', e); }
+    finally { setSlotsLoading(false); }
+  };
+
+  /** Step 3 → Step 4: Select slot → confirm */
+  const handleSelectSlot = (slot) => {
+    setSelectedSlot(slot);
+    setBookingStep(4);
+  };
+
+  /** Step 4: Submit booking → create appointment */
+  const handleConfirmBooking = async () => {
+    if (!selectedDoctor || !selectedSlot || !bookingReason.trim()) {
+      openModal('error', 'خطأ', 'الرجاء إدخال سبب الزيارة');
+      return;
+    }
+    setBookingSubmitting(true);
+
+    try {
+      const token = localStorage.getItem('token');
+      const res = await fetch('http://localhost:5000/api/patient/appointments', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
+        body: JSON.stringify({
+          appointmentType: 'doctor',
+          doctorId: selectedDoctor._id,
+          slotId: selectedSlot._id,
+          appointmentDate: selectedSlot.date,
+          appointmentTime: selectedSlot.startTime,
+          reasonForVisit: bookingReason,
+          bookingMethod: 'online',
+          priority: 'routine',
+          status: 'scheduled'
+        })
+      });
+      const data = await res.json();
+
+      if (res.ok && data.success) {
+        openModal('success', 'تم الحجز بنجاح ✅', `تم حجز موعدك مع د. ${selectedDoctor.firstName} ${selectedDoctor.lastName}\nالتاريخ: ${formatDate(selectedSlot.date)}\nالوقت: ${selectedSlot.startTime}`);
+        setBookingStep(0);
+        setBookingSpec('');
+        setSelectedDoctor(null);
+        setSelectedSlot(null);
+        setBookingReason('');
+        // Refresh appointments
+        const aptRes = await fetch('http://localhost:5000/api/patient/appointments', { headers: { 'Authorization': `Bearer ${token}` } });
+        const aptData = await aptRes.json();
+        if (aptRes.ok && aptData.success) setAppointments(aptData.appointments || []);
+      } else {
+        openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء الحجز');
+      }
+    } catch (e) {
+      console.error('Booking error:', e);
+      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
+    } finally { setBookingSubmitting(false); }
+  };
+
+  /** Reset booking wizard */
+  const resetBooking = () => {
+    setBookingStep(0);
+    setBookingSpec('');
+    setBookingDoctors([]);
+    setSelectedDoctor(null);
+    setDoctorSlots([]);
+    setSelectedSlot(null);
+    setBookingReason('');
+  };
 
   const handleLogout = () => openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', () => authAPI.logout());
   
@@ -818,16 +1089,28 @@ const [loadingMedications, setLoadingMedications] = useState(false);
       <div className="dashboard-container">
         {/* Dashboard Tabs */}
         <div className="dashboard-tabs">
-          {['overview', 'visits', 'consultation', 'medications'].map(section => (
+          {[
+            { id: 'overview', icon: '📊', label: 'نظرة عامة' },
+            { id: 'appointments', icon: '📅', label: 'المواعيد' },
+            { id: 'visits', icon: '📋', label: 'الزيارات' },
+            { id: 'labResults', icon: '🔬', label: 'التحاليل' },
+            { id: 'prescriptions', icon: '📜', label: 'الوصفات' },
+            { id: 'consultation', icon: '🤖', label: 'استشيرني' },
+            { id: 'medications', icon: '💊', label: 'الأدوية' }
+          ].map(tab => (
             <button 
-              key={section} 
-              className={`tab-btn ${activeSection === section ? 'active' : ''}`} 
-              onClick={() => setActiveSection(section)}
+              key={tab.id} 
+              className={`tab-btn ${activeSection === tab.id ? 'active' : ''}`} 
+              onClick={() => setActiveSection(tab.id)}
             >
-              <span className="tab-icon">
-                {section === 'overview' ? '📊' : section === 'visits' ? '📋' : section === 'consultation' ? '🤖' : '💊'}
-              </span>
-              {section === 'overview' ? 'نظرة عامة' : section === 'visits' ? 'سجل الزيارات' : section === 'consultation' ? 'استشيرني' : 'تقويم الأدوية'}
+              <span className="tab-icon">{tab.icon}</span>
+              {tab.label}
+              {tab.id === 'appointments' && appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length > 0 && (
+                <span className="tab-badge">{appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length}</span>
+              )}
+              {tab.id === 'labResults' && labResults.filter(l => !l.isViewedByPatient && l.status === 'completed').length > 0 && (
+                <span className="tab-badge new">{labResults.filter(l => !l.isViewedByPatient && l.status === 'completed').length}</span>
+              )}
             </button>
           ))}
         </div>
@@ -850,7 +1133,7 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                 </div>
                 <div className="profile-header-info">
                   <p className="welcome-greeting">مرحباً 👋</p>
-                  <h1>{user.firstName} {user.lastName}</h1>
+                  <h1>{user.firstName} {user.fatherName && `${user.fatherName} `}{user.lastName}</h1>
                   <p className="profile-role">مريض - Patient 360°</p>
                   <div className="profile-meta-info">
                     {age && <div className="meta-item"><span>🎂</span><span>{age} سنة</span></div>}
@@ -868,6 +1151,20 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                 <div className="stat-content">
                   <h3>{visits.length}</h3>
                   <p>زيارة طبية</p>
+                </div>
+              </div>
+              <div className="quick-stat-card appointments">
+                <div className="stat-icon-wrapper"><span>📅</span></div>
+                <div className="stat-content">
+                  <h3>{appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length}</h3>
+                  <p>موعد قادم</p>
+                </div>
+              </div>
+              <div className="quick-stat-card labs">
+                <div className="stat-icon-wrapper"><span>🔬</span></div>
+                <div className="stat-content">
+                  <h3>{labResults.length}</h3>
+                  <p>تحليل مخبري</p>
                 </div>
               </div>
               {bmi && (
@@ -937,11 +1234,38 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                     <p className="card-value">{user.address}</p>
                   </div>
                 )}
+                {user.governorate && (
+                  <div className="info-display-card">
+                    <div className="card-icon-header">
+                      <div className="icon-circle gov"><span>🏛️</span></div>
+                      <h3>المحافظة</h3>
+                    </div>
+                    <p className="card-value">{user.governorate}</p>
+                  </div>
+                )}
+                {user.city && (
+                  <div className="info-display-card">
+                    <div className="card-icon-header">
+                      <div className="icon-circle city"><span>🏙️</span></div>
+                      <h3>المدينة</h3>
+                    </div>
+                    <p className="card-value">{user.city}</p>
+                  </div>
+                )}
+                {user.motherName && (
+                  <div className="info-display-card">
+                    <div className="card-icon-header">
+                      <div className="icon-circle mother"><span>👩</span></div>
+                      <h3>اسم الأم</h3>
+                    </div>
+                    <p className="card-value">{user.motherName}</p>
+                  </div>
+                )}
               </div>
             </div>
 
             {/* Medical Information Section */}
-            {(patientData.bloodType || patientData.height || patientData.weight) && (
+            {(patientData.bloodType || patientData.height || patientData.weight || patientData.smokingStatus) && (
               <div className="data-section">
                 <div className="section-header">
                   <div className="section-title-wrapper">
@@ -957,6 +1281,9 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                         <h3>فصيلة الدم</h3>
                       </div>
                       <div className="medical-value-large">{patientData.bloodType}</div>
+                      {patientData.rhFactor && patientData.rhFactor !== 'unknown' && (
+                        <div className="medical-unit">Rh: {patientData.rhFactor === 'positive' ? '+' : '-'}</div>
+                      )}
                     </div>
                   )}
                   {patientData.height && (
@@ -977,6 +1304,19 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                       </div>
                       <div className="medical-value-large">{patientData.weight}</div>
                       <div className="medical-unit">كجم</div>
+                    </div>
+                  )}
+                  {patientData.smokingStatus && (
+                    <div className="medical-card">
+                      <div className="medical-card-header">
+                        <div className="medical-icon">🚬</div>
+                        <h3>حالة التدخين</h3>
+                      </div>
+                      <div className="medical-value-large smoking-status">
+                        {patientData.smokingStatus === 'non-smoker' ? '🚫 غير مدخن' :
+                         patientData.smokingStatus === 'former_smoker' ? '✅ مدخن سابق' :
+                         patientData.smokingStatus === 'current_smoker' ? '⚠️ مدخن حالي' : patientData.smokingStatus}
+                      </div>
                     </div>
                   )}
                 </div>
@@ -1042,6 +1382,561 @@ const [loadingMedications, setLoadingMedications] = useState(false);
                 </div>
               </div>
             </div>
+
+            {/* Emergency Contact Section */}
+            {patientData.emergencyContact && (
+              <div className="data-section">
+                <div className="section-header">
+                  <div className="section-title-wrapper">
+                    <span className="section-icon">🆘</span>
+                    <h2>جهة الاتصال للطوارئ</h2>
+                  </div>
+                </div>
+                <div className="emergency-contact-card">
+                  <div className="emergency-info-grid">
+                    <div className="emergency-item">
+                      <span className="emergency-label">👤 الاسم:</span>
+                      <span className="emergency-value">{patientData.emergencyContact.name}</span>
+                    </div>
+                    <div className="emergency-item">
+                      <span className="emergency-label">👨‍👩‍👦 صلة القرابة:</span>
+                      <span className="emergency-value">{patientData.emergencyContact.relationship}</span>
+                    </div>
+                    <div className="emergency-item">
+                      <span className="emergency-label">📞 رقم الهاتف:</span>
+                      <span className="emergency-value" dir="ltr">{patientData.emergencyContact.phoneNumber}</span>
+                    </div>
+                    {patientData.emergencyContact.alternativePhoneNumber && (
+                      <div className="emergency-item">
+                        <span className="emergency-label">📱 رقم بديل:</span>
+                        <span className="emergency-value" dir="ltr">{patientData.emergencyContact.alternativePhoneNumber}</span>
+                      </div>
+                    )}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Previous Surgeries — patients.previousSurgeries[] */}
+            {patientData.previousSurgeries && patientData.previousSurgeries.length > 0 && (
+              <div className="data-section">
+                <div className="section-header">
+                  <div className="section-title-wrapper">
+                    <span className="section-icon">🔪</span>
+                    <h2>العمليات الجراحية السابقة</h2>
+                  </div>
+                </div>
+                <div className="surgeries-grid">
+                  {patientData.previousSurgeries.map((surgery, index) => (
+                    <div key={index} className="surgery-card">
+                      <div className="surgery-icon">🏥</div>
+                      <div className="surgery-info">
+                        <h4>{surgery.surgeryName}</h4>
+                        {surgery.surgeryDate && (
+                          <span className="surgery-date">📅 {formatDate(surgery.surgeryDate)}</span>
+                        )}
+                        {surgery.hospital && (
+                          <span className="surgery-hospital">🏨 {surgery.hospital}</span>
+                        )}
+                        {surgery.notes && (
+                          <p className="surgery-notes">{surgery.notes}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Current Long-term Medications — patients.currentMedications[] */}
+            {patientData.currentMedications && patientData.currentMedications.length > 0 && (
+              <div className="data-section">
+                <div className="section-header">
+                  <div className="section-title-wrapper">
+                    <span className="section-icon">💊</span>
+                    <h2>الأدوية المستمرة</h2>
+                  </div>
+                  <span className="section-count-badge">{patientData.currentMedications.length} دواء</span>
+                </div>
+                <div className="current-meds-list">
+                  {patientData.currentMedications.map((med, index) => (
+                    <div key={index} className="current-med-chip">
+                      <span className="med-chip-icon">💊</span>
+                      <span className="med-chip-name">{med}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* APPOINTMENTS SECTION — appointments collection */}
+        {activeSection === 'appointments' && (
+          <div className="section-content">
+            <div className="page-section-header">
+              <div className="section-header-content">
+                <div className="section-icon-box"><span>📅</span></div>
+                <div><h1>المواعيد الطبية</h1><p>Appointments</p></div>
+              </div>
+              <div className="header-actions">
+                <div className="section-count-badge">{appointments.length} موعد</div>
+                {bookingStep === 0 && (
+                  <button className="book-apt-btn" onClick={() => setBookingStep(1)}>
+                    <span>➕</span> حجز موعد جديد
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* ══════════════════════════════════════════════════════
+                BOOKING WIZARD — 4 Steps
+                ══════════════════════════════════════════════════════ */}
+            {bookingStep > 0 && (
+              <div className="booking-wizard">
+                {/* Progress Steps */}
+                <div className="booking-progress">
+                  {[
+                    { num: 1, label: 'التخصص' },
+                    { num: 2, label: 'الطبيب' },
+                    { num: 3, label: 'الموعد' },
+                    { num: 4, label: 'التأكيد' }
+                  ].map(s => (
+                    <div key={s.num} className={`progress-step ${bookingStep >= s.num ? 'active' : ''} ${bookingStep === s.num ? 'current' : ''}`}>
+                      <div className="step-circle">{bookingStep > s.num ? '✓' : s.num}</div>
+                      <span className="step-label">{s.label}</span>
+                    </div>
+                  ))}
+                </div>
+
+                <button className="booking-cancel-btn" onClick={resetBooking}>✕ إلغاء الحجز</button>
+
+                {/* ── Step 1: Choose Specialization ────────────── */}
+                {bookingStep === 1 && (
+                  <div className="booking-step-content">
+                    <h2 className="step-title">🏥 اختر التخصص الطبي</h2>
+                    <p className="step-desc">اختر التخصص الذي تريد حجز موعد فيه</p>
+                    <div className="specializations-grid">
+                      {BOOKING_SPECIALIZATIONS.map(spec => (
+                        <button key={spec.id} className="spec-card" onClick={() => handleSelectSpecialization(spec.id)}>
+                          <span className="spec-icon">{spec.icon}</span>
+                          <span className="spec-name">{spec.nameAr}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* ── Step 2: Choose Doctor ─────────────────────── */}
+                {bookingStep === 2 && (
+                  <div className="booking-step-content">
+                    <button className="back-step-btn" onClick={() => setBookingStep(1)}>→ رجوع للتخصصات</button>
+                    <h2 className="step-title">👨‍⚕️ اختر الطبيب</h2>
+                    <p className="step-desc">الأطباء المتاحون في تخصص {BOOKING_SPECIALIZATIONS.find(s => s.id === bookingSpec)?.nameAr}</p>
+
+                    {bookingDoctorsLoading && (
+                      <div className="loading-state"><div className="spinner"></div><p>جاري البحث عن الأطباء...</p></div>
+                    )}
+
+                    {!bookingDoctorsLoading && bookingDoctors.length === 0 && (
+                      <div className="empty-state-card">
+                        <div className="empty-icon">👨‍⚕️</div>
+                        <h3>لا يوجد أطباء متاحون حالياً</h3>
+                        <p>جرب تخصصاً آخر أو حاول لاحقاً</p>
+                      </div>
+                    )}
+
+                    {!bookingDoctorsLoading && bookingDoctors.length > 0 && (
+                      <div className="doctors-list">
+                        {bookingDoctors.map((doc, i) => (
+                          <div key={doc._id || i} className="doctor-card-booking" onClick={() => handleSelectDoctor(doc)}>
+                            <div className="doc-avatar"><span>👨‍⚕️</span></div>
+                            <div className="doc-info">
+                              <h3>د. {doc.firstName} {doc.fatherName && `${doc.fatherName} `}{doc.lastName}</h3>
+                              <div className="doc-meta-grid">
+                                {doc.hospitalAffiliation && (
+                                  <span className="doc-meta-item">🏥 {doc.hospitalAffiliation}</span>
+                                )}
+                                {doc.governorate && (
+                                  <span className="doc-meta-item">📍 {doc.governorate}{doc.city ? ` - ${doc.city}` : ''}</span>
+                                )}
+                                {doc.yearsOfExperience && (
+                                  <span className="doc-meta-item">📅 {doc.yearsOfExperience} سنة خبرة</span>
+                                )}
+                                {doc.consultationFee && (
+                                  <span className="doc-meta-item">💰 {doc.consultationFee?.toLocaleString()} {doc.currency || 'ل.س'}</span>
+                                )}
+                              </div>
+                              {doc.averageRating > 0 && (
+                                <div className="doc-rating">
+                                  <span className="rating-stars">{'⭐'.repeat(Math.round(doc.averageRating))}</span>
+                                  <span className="rating-num">{doc.averageRating.toFixed(1)}</span>
+                                  <span className="rating-count">({doc.totalReviews} تقييم)</span>
+                                </div>
+                              )}
+                            </div>
+                            <div className="doc-select-arrow">←</div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Step 3: Choose Time Slot ──────────────────── */}
+                {bookingStep === 3 && selectedDoctor && (
+                  <div className="booking-step-content">
+                    <button className="back-step-btn" onClick={() => setBookingStep(2)}>→ رجوع للأطباء</button>
+                    <h2 className="step-title">📅 اختر الموعد المتاح</h2>
+                    <div className="selected-doctor-mini">
+                      <span>👨‍⚕️</span>
+                      <span>د. {selectedDoctor.firstName} {selectedDoctor.lastName}</span>
+                      <span className="mini-hospital">🏥 {selectedDoctor.hospitalAffiliation || ''}</span>
+                    </div>
+
+                    {slotsLoading && (
+                      <div className="loading-state"><div className="spinner"></div><p>جاري تحميل المواعيد المتاحة...</p></div>
+                    )}
+
+                    {!slotsLoading && doctorSlots.length === 0 && (
+                      <div className="empty-state-card">
+                        <div className="empty-icon">📅</div>
+                        <h3>لا توجد مواعيد متاحة حالياً</h3>
+                        <p>لا يوجد أوقات فارغة لهذا الطبيب، جرب طبيباً آخر</p>
+                      </div>
+                    )}
+
+                    {!slotsLoading && doctorSlots.length > 0 && (
+                      <div className="slots-grid">
+                        {doctorSlots.map((slot, i) => {
+                          const isFull = slot.currentBookings >= slot.maxBookings;
+                          const remaining = slot.maxBookings - (slot.currentBookings || 0);
+                          return (
+                            <button key={slot._id || i}
+                              className={`slot-card ${selectedSlot?._id === slot._id ? 'selected' : ''} ${isFull ? 'full' : ''}`}
+                              onClick={() => !isFull && handleSelectSlot(slot)}
+                              disabled={isFull}>
+                              <div className="slot-date">
+                                <span className="slot-day-num">{slot.date ? new Date(slot.date).getDate() : '--'}</span>
+                                <span className="slot-month">{slot.date ? new Date(slot.date).toLocaleDateString('ar-EG', { month: 'short', weekday: 'short' }) : ''}</span>
+                              </div>
+                              <div className="slot-time">
+                                <span className="time-range">{slot.startTime} — {slot.endTime}</span>
+                                {slot.slotDuration && <span className="slot-duration">{slot.slotDuration} دقيقة</span>}
+                              </div>
+                              <div className={`slot-availability ${isFull ? 'full' : remaining <= 2 ? 'limited' : 'open'}`}>
+                                {isFull ? '🔴 مكتمل' : remaining <= 2 ? `🟡 ${remaining} أماكن فقط` : `🟢 ${remaining} أماكن متاحة`}
+                              </div>
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* ── Step 4: Confirm Booking ───────────────────── */}
+                {bookingStep === 4 && selectedDoctor && selectedSlot && (
+                  <div className="booking-step-content">
+                    <button className="back-step-btn" onClick={() => setBookingStep(3)}>→ رجوع للمواعيد</button>
+                    <h2 className="step-title">✅ تأكيد الحجز</h2>
+
+                    <div className="booking-summary">
+                      <div className="summary-row">
+                        <span className="summary-label">👨‍⚕️ الطبيب:</span>
+                        <span className="summary-value">د. {selectedDoctor.firstName} {selectedDoctor.fatherName && `${selectedDoctor.fatherName} `}{selectedDoctor.lastName}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="summary-label">🏥 المشفى:</span>
+                        <span className="summary-value">{selectedDoctor.hospitalAffiliation || '-'}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="summary-label">📅 التاريخ:</span>
+                        <span className="summary-value">{formatDate(selectedSlot.date)}</span>
+                      </div>
+                      <div className="summary-row">
+                        <span className="summary-label">🕐 الوقت:</span>
+                        <span className="summary-value" dir="ltr">{selectedSlot.startTime} — {selectedSlot.endTime}</span>
+                      </div>
+                      {selectedDoctor.consultationFee && (
+                        <div className="summary-row">
+                          <span className="summary-label">💰 رسوم الكشف:</span>
+                          <span className="summary-value">{selectedDoctor.consultationFee?.toLocaleString()} {selectedDoctor.currency || 'ل.س'}</span>
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="booking-reason-section">
+                      <label>📝 سبب الزيارة <span className="required">*</span></label>
+                      <textarea
+                        placeholder="مثال: فحص دوري، ألم في الصدر، متابعة..."
+                        value={bookingReason}
+                        onChange={e => setBookingReason(e.target.value)}
+                        className="booking-textarea"
+                        rows={3}
+                      />
+                    </div>
+
+                    <button className="confirm-booking-btn" onClick={handleConfirmBooking}
+                      disabled={bookingSubmitting || !bookingReason.trim()}>
+                      {bookingSubmitting ? <><span className="btn-spinner"></span> جاري الحجز...</> :
+                        <><span>✅</span> تأكيد حجز الموعد</>}
+                    </button>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* ══════════════════════════════════════════════════════
+                EXISTING APPOINTMENTS (unchanged)
+                ══════════════════════════════════════════════════════ */}
+            {bookingStep === 0 && loadingAppointments && (
+              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل المواعيد...</p></div>
+            )}
+
+            {bookingStep === 0 && !loadingAppointments && appointments.length === 0 && (
+              <div className="empty-state-card">
+                <div className="empty-icon">📅</div>
+                <h3>لا توجد مواعيد</h3>
+                <p>اضغط على "حجز موعد جديد" لحجز أول موعد لك</p>
+              </div>
+            )}
+
+            {bookingStep === 0 && !loadingAppointments && appointments.length > 0 && (
+              <>
+                {/* Upcoming Appointments */}
+                {appointments.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length > 0 && (
+                  <div className="appointments-section-group">
+                    <h3 className="group-title"><span>🟢</span> المواعيد القادمة</h3>
+                    <div className="appointments-grid">
+                      {appointments.filter(a => ['scheduled', 'confirmed'].includes(a.status)).map((apt, i) => (
+                        <div key={apt._id || i} className={`appointment-card upcoming ${apt.priority === 'urgent' ? 'urgent' : ''}`}>
+                          <div className="apt-card-accent"></div>
+                          <div className="apt-card-body">
+                            <div className="apt-date-block">
+                              <span className="apt-day">{apt.appointmentDate ? new Date(apt.appointmentDate).getDate() : '--'}</span>
+                              <span className="apt-month">{apt.appointmentDate ? new Date(apt.appointmentDate).toLocaleDateString('ar-EG', { month: 'short' }) : ''}</span>
+                            </div>
+                            <div className="apt-info">
+                              <div className="apt-type-badge">
+                                {apt.appointmentType === 'doctor' ? '🩺 طبيب' :
+                                 apt.appointmentType === 'dentist' ? '🦷 أسنان' :
+                                 apt.appointmentType === 'lab_test' ? '🔬 تحليل' :
+                                 apt.appointmentType === 'follow_up' ? '🔄 متابعة' : '🚑 طوارئ'}
+                              </div>
+                              <h4>{apt.reasonForVisit || 'موعد طبي'}</h4>
+                              <div className="apt-meta">
+                                {apt.appointmentTime && <span>🕐 {apt.appointmentTime}</span>}
+                                {apt.doctorId?.firstName && <span>👨‍⚕️ د. {apt.doctorId.firstName} {apt.doctorId.lastName}</span>}
+                              </div>
+                            </div>
+                            <div className={`apt-status-badge ${apt.status}`}>
+                              {apt.status === 'scheduled' ? 'محجوز' : 'مؤكد'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+
+                {/* Past Appointments */}
+                {appointments.filter(a => ['completed', 'cancelled', 'no_show'].includes(a.status)).length > 0 && (
+                  <div className="appointments-section-group">
+                    <h3 className="group-title"><span>📜</span> المواعيد السابقة</h3>
+                    <div className="appointments-grid past">
+                      {appointments.filter(a => ['completed', 'cancelled', 'no_show'].includes(a.status)).map((apt, i) => (
+                        <div key={apt._id || i} className={`appointment-card past ${apt.status}`}>
+                          <div className="apt-card-body">
+                            <div className="apt-date-block small">
+                              <span className="apt-day">{apt.appointmentDate ? new Date(apt.appointmentDate).getDate() : '--'}</span>
+                              <span className="apt-month">{apt.appointmentDate ? new Date(apt.appointmentDate).toLocaleDateString('ar-EG', { month: 'short', year: 'numeric' }) : ''}</span>
+                            </div>
+                            <div className="apt-info">
+                              <h4>{apt.reasonForVisit || 'موعد طبي'}</h4>
+                              {apt.doctorId?.firstName && <span className="apt-doctor">👨‍⚕️ د. {apt.doctorId.firstName}</span>}
+                            </div>
+                            <div className={`apt-status-badge ${apt.status}`}>
+                              {apt.status === 'completed' ? '✅ مكتمل' : apt.status === 'cancelled' ? '❌ ملغي' : '⚠️ لم يحضر'}
+                            </div>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
+        {/* LAB RESULTS SECTION — lab_tests collection */}
+        {activeSection === 'labResults' && (
+          <div className="section-content">
+            <div className="page-section-header">
+              <div className="section-header-content">
+                <div className="section-icon-box"><span>🔬</span></div>
+                <div><h1>نتائج التحاليل المخبرية</h1><p>Laboratory Results</p></div>
+              </div>
+              <div className="section-count-badge">{labResults.length} تحليل</div>
+            </div>
+
+            {loadingLabResults && (
+              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل التحاليل...</p></div>
+            )}
+
+            {!loadingLabResults && labResults.length === 0 && (
+              <div className="empty-state-card">
+                <div className="empty-icon">🔬</div>
+                <h3>لا توجد تحاليل مخبرية</h3>
+                <p>سيتم عرض نتائج تحاليلك هنا بعد إجرائها</p>
+              </div>
+            )}
+
+            {!loadingLabResults && labResults.length > 0 && (
+              <div className="lab-results-list">
+                {labResults.map((lab, i) => (
+                  <div key={lab._id || i} className={`lab-result-card ${lab.isCritical ? 'critical' : ''} ${!lab.isViewedByPatient && lab.status === 'completed' ? 'unread' : ''}`}>
+                    <div className="lab-card-header">
+                      <div className="lab-header-info">
+                        <div className="lab-number">
+                          <span className="lab-icon">{lab.isCritical ? '🔴' : '🔬'}</span>
+                          <span>{lab.testNumber}</span>
+                          {!lab.isViewedByPatient && lab.status === 'completed' && <span className="new-badge">جديد</span>}
+                        </div>
+                        <span className="lab-date">📅 {formatDate(lab.orderDate)}</span>
+                      </div>
+                      <div className={`lab-status-badge ${lab.status}`}>
+                        {lab.status === 'ordered' ? '📝 مطلوب' :
+                         lab.status === 'scheduled' ? '📅 محجوز' :
+                         lab.status === 'sample_collected' ? '🧪 تم أخذ العينة' :
+                         lab.status === 'in_progress' ? '⏳ قيد التحليل' :
+                         lab.status === 'completed' ? '✅ مكتمل' :
+                         lab.status === 'cancelled' ? '❌ ملغي' : lab.status}
+                      </div>
+                    </div>
+
+                    {/* Tests Ordered */}
+                    {lab.testsOrdered && lab.testsOrdered.length > 0 && (
+                      <div className="lab-tests-ordered">
+                        <span className="tests-label">التحاليل المطلوبة:</span>
+                        <div className="tests-chips">
+                          {lab.testsOrdered.map((test, j) => (
+                            <span key={j} className="test-chip">{test.testName}</span>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+
+                    {/* Test Results */}
+                    {lab.status === 'completed' && lab.testResults && lab.testResults.length > 0 && (
+                      <div className="lab-results-table">
+                        <div className="results-table-header">
+                          <span>التحليل</span><span>النتيجة</span><span>الوحدة</span><span>المرجع</span><span>الحالة</span>
+                        </div>
+                        {lab.testResults.map((result, j) => (
+                          <div key={j} className={`results-table-row ${result.isAbnormal ? 'abnormal' : ''} ${result.isCritical ? 'critical' : ''}`}>
+                            <span className="result-name">{result.testName}</span>
+                            <span className="result-value">{result.value}</span>
+                            <span className="result-unit">{result.unit || '-'}</span>
+                            <span className="result-range">{result.referenceRange || '-'}</span>
+                            <span className="result-status">
+                              {result.isCritical ? '🔴 حرج' : result.isAbnormal ? '🟡 غير طبيعي' : '🟢 طبيعي'}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* PDF Download */}
+                    {lab.resultPdfUrl && (
+                      <a href={lab.resultPdfUrl} target="_blank" rel="noopener noreferrer" className="lab-pdf-btn">
+                        <span>📄</span> تحميل التقرير PDF
+                      </a>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* PRESCRIPTIONS SECTION — prescriptions collection */}
+        {activeSection === 'prescriptions' && (
+          <div className="section-content">
+            <div className="page-section-header">
+              <div className="section-header-content">
+                <div className="section-icon-box"><span>📜</span></div>
+                <div><h1>الوصفات الطبية</h1><p>Prescriptions</p></div>
+              </div>
+              <div className="section-count-badge">{prescriptions.length} وصفة</div>
+            </div>
+
+            {loadingPrescriptions && (
+              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل الوصفات...</p></div>
+            )}
+
+            {!loadingPrescriptions && prescriptions.length === 0 && (
+              <div className="empty-state-card">
+                <div className="empty-icon">📜</div>
+                <h3>لا توجد وصفات طبية</h3>
+                <p>سيتم عرض وصفاتك الطبية هنا بعد أن يصف لك الطبيب علاجاً</p>
+              </div>
+            )}
+
+            {!loadingPrescriptions && prescriptions.length > 0 && (
+              <div className="prescriptions-list">
+                {prescriptions.map((rx, i) => (
+                  <div key={rx._id || i} className={`prescription-card ${rx.status}`}>
+                    <div className="rx-card-header">
+                      <div className="rx-header-info">
+                        <span className="rx-number">📜 {rx.prescriptionNumber}</span>
+                        <span className="rx-date">{formatDate(rx.prescriptionDate)}</span>
+                      </div>
+                      <div className={`rx-status-badge ${rx.status}`}>
+                        {rx.status === 'active' ? '🟢 نشطة' :
+                         rx.status === 'dispensed' ? '✅ تم الصرف' :
+                         rx.status === 'partially_dispensed' ? '🟡 صرف جزئي' :
+                         rx.status === 'expired' ? '⏰ منتهية' : '❌ ملغاة'}
+                      </div>
+                    </div>
+
+                    {/* Medications in prescription */}
+                    <div className="rx-medications">
+                      {rx.medications && rx.medications.map((med, j) => (
+                        <div key={j} className={`rx-med-item ${med.isDispensed ? 'dispensed' : ''}`}>
+                          <span className="rx-med-icon">{med.isDispensed ? '✅' : '💊'}</span>
+                          <div className="rx-med-info">
+                            <strong>{med.medicationName}</strong>
+                            <span>{med.dosage} — {med.frequency} — {med.duration}</span>
+                            {med.route && <span className="rx-route-badge">{med.route === 'oral' ? 'فموي' : med.route === 'injection' ? 'حقن' : med.route}</span>}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+
+                    {/* QR Code + Verification */}
+                    {rx.status === 'active' && rx.verificationCode && (
+                      <div className="rx-verification">
+                        <div className="rx-qr-section">
+                          <span className="qr-icon">📱</span>
+                          <div className="qr-info">
+                            <span className="qr-label">رمز التحقق للصيدلية:</span>
+                            <span className="verification-code">{rx.verificationCode}</span>
+                          </div>
+                        </div>
+                        {rx.expiryDate && (
+                          <div className="rx-expiry">
+                            <span>⏰</span>
+                            <span>صالحة حتى: {formatDate(rx.expiryDate)}</span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
 
@@ -1307,8 +2202,8 @@ const [loadingMedications, setLoadingMedications] = useState(false);
             <div className="pulse-ring"></div>
           </div>
           <div className="medications-header-text">
-            <h1>تقويم الأدوية</h1>
-            <p>Medication Calendar & Schedule</p>
+            <h1>الأدوية الموصوفة</h1>
+            <p>Prescribed Medications</p>
           </div>
         </div>
         <div className="medications-count-badge">
@@ -1333,7 +2228,7 @@ const [loadingMedications, setLoadingMedications] = useState(false);
           <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
           <div className="empty-info">
             <span>💡</span>
-            <p>التقويم يعرض مواعيد تناول الأدوية اليومية والأسبوعية</p>
+            <p>يتم عرض تفاصيل كل دواء: الجرعة، التكرار، المدة، والتعليمات</p>
           </div>
         </div>
       )}
@@ -1428,79 +2323,13 @@ const [loadingMedications, setLoadingMedications] = useState(false);
             </div>
           </div>
 
-          {/* Weekly Schedule */}
-          {medicationSchedule && medicationSchedule.weeklySchedule && (
-            <div className="weekly-schedule-section">
-              <div className="section-header-meds">
-                <div className="header-left">
-                  <span className="section-icon">📅</span>
-                  <div>
-                    <h2>التقويم الأسبوعي</h2>
-                    <p>Weekly Medication Schedule</p>
-                  </div>
-                </div>
-              </div>
-
-              <div className="weekly-schedule-grid">
-                {medicationSchedule.weeklySchedule.map((daySchedule, index) => (
-                  <div 
-                    key={index} 
-                    className={`day-schedule-card ${index === new Date().getDay() ? 'today' : ''}`}
-                  >
-                    {/* Day Header */}
-                    <div className="day-header">
-                      <h3>{daySchedule.day}</h3>
-                      {index === new Date().getDay() && (
-                        <span className="today-badge">اليوم</span>
-                      )}
-                      <span className="day-count">
-                        {daySchedule.medications.length} جرعة
-                      </span>
-                    </div>
-
-                    {/* Day Medications Timeline */}
-                    <div className="day-medications-timeline">
-                      {daySchedule.medications.length > 0 ? (
-                        daySchedule.medications.map((med, medIndex) => (
-                          <div key={medIndex} className="timeline-item">
-                            <div className="timeline-time">
-                              <span className="time-icon">🕐</span>
-                              <span className="time-text">{med.time}</span>
-                            </div>
-                            <div className="timeline-content">
-                              <div className="timeline-med-name">
-                                <span className="med-icon-small">💊</span>
-                                <span>{med.medicationName}</span>
-                              </div>
-                              <div className="timeline-med-dosage">{med.dosage}</div>
-                              {med.instructions && (
-                                <div className="timeline-med-instructions">
-                                  {med.instructions}
-                                </div>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      ) : (
-                        <div className="no-medications-day">
-                          <span>✓</span>
-                          <p>لا توجد أدوية</p>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
           {/* Medication Instructions Banner */}
           <div className="medication-instructions-banner">
             <div className="instructions-icon">⚠️</div>
             <div className="instructions-content">
               <h4>تعليمات هامة</h4>
               <ul>
-                <li>التزم بمواعيد تناول الأدوية المحددة من قبل الطبيب</li>
+                <li>التزم بالجرعة والتكرار والمدة المحددة من قبل الطبيب</li>
                 <li>لا توقف أو تغير الجرعة دون استشارة الطبيب</li>
                 <li>احتفظ بالأدوية في مكان آمن وبعيد عن متناول الأطفال</li>
                 <li>في حالة نسيان جرعة، استشر الطبيب أو الصيدلي</li>

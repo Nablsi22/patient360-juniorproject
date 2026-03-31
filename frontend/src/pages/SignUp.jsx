@@ -17,30 +17,30 @@ import '../styles/SignUp.css';
  * ============================================
  */
 const MEDICAL_SPECIALIZATIONS = [
-  { id: 'Cardiologist', nameAr: 'طبيب قلب', icon: '❤️', hasECG: true },
-  { id: 'Pulmonologist', nameAr: 'طبيب أمراض الرئة', icon: '🫁', hasECG: false },
-  { id: 'General Practitioner', nameAr: 'طبيب عام', icon: '🩺', hasECG: false },
-  { id: 'Infectious Disease Specialist', nameAr: 'طبيب أمراض معدية', icon: '🦠', hasECG: false },
-  { id: 'Intensive Care Specialist', nameAr: 'طبيب عناية مركزة', icon: '🏥', hasECG: false },
-  { id: 'Rheumatologist', nameAr: 'طبيب روماتيزم', icon: '🦴', hasECG: false },
-  { id: 'Orthopedic Surgeon', nameAr: 'جراح عظام', icon: '🦿', hasECG: false },
-  { id: 'Neurologist', nameAr: 'طبيب أعصاب', icon: '🧠', hasECG: false },
-  { id: 'Endocrinologist', nameAr: 'طبيب غدد صماء', icon: '⚗️', hasECG: false },
-  { id: 'Dermatologist', nameAr: 'طبيب جلدية', icon: '🧴', hasECG: false },
-  { id: 'Gastroenterologist', nameAr: 'طبيب جهاز هضمي', icon: '🫃', hasECG: false },
-  { id: 'General Surgeon', nameAr: 'جراح عام', icon: '🔪', hasECG: false },
-  { id: 'Hepatologist', nameAr: 'طبيب كبد', icon: '🫀', hasECG: false },
-  { id: 'Urologist', nameAr: 'طبيب مسالك بولية', icon: '💧', hasECG: false },
-  { id: 'Gynecologist', nameAr: 'طبيب نساء وتوليد', icon: '🤰', hasECG: false },
-  { id: 'Psychiatrist', nameAr: 'طبيب نفسي', icon: '🧘', hasECG: false },
-  { id: 'Hematologist', nameAr: 'طبيب دم', icon: '🩸', hasECG: false },
-  { id: 'Oncologist', nameAr: 'طبيب أورام', icon: '🎗️', hasECG: false },
-  { id: 'ENT Specialist', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂', hasECG: false },
-  { id: 'Ophthalmologist', nameAr: 'طبيب عيون', icon: '👁️', hasECG: false },
-  { id: 'Pediatrician', nameAr: 'طبيب أطفال', icon: '👶', hasECG: false },
-  { id: 'Nephrologist', nameAr: 'طبيب كلى', icon: '🫘', hasECG: false },
-  { id: 'Internal Medicine', nameAr: 'طبيب باطنية', icon: '🏨', hasECG: false },
-  { id: 'Emergency Medicine', nameAr: 'طبيب طوارئ', icon: '🚑', hasECG: false }
+  { id: 'cardiology', nameAr: 'طبيب قلب', icon: '❤️', hasECG: true },
+  { id: 'pulmonology', nameAr: 'طبيب أمراض الرئة', icon: '🫁', hasECG: false },
+  { id: 'general_practice', nameAr: 'طبيب عام', icon: '🩺', hasECG: false },
+  { id: 'rheumatology', nameAr: 'طبيب روماتيزم', icon: '🦴', hasECG: false },
+  { id: 'orthopedics', nameAr: 'جراح عظام', icon: '🦿', hasECG: false },
+  { id: 'neurology', nameAr: 'طبيب أعصاب', icon: '🧠', hasECG: false },
+  { id: 'endocrinology', nameAr: 'طبيب غدد صماء', icon: '⚗️', hasECG: false },
+  { id: 'dermatology', nameAr: 'طبيب جلدية', icon: '🧴', hasECG: false },
+  { id: 'gastroenterology', nameAr: 'طبيب جهاز هضمي', icon: '🫃', hasECG: false },
+  { id: 'surgery', nameAr: 'جراح عام', icon: '🔪', hasECG: false },
+  { id: 'urology', nameAr: 'طبيب مسالك بولية', icon: '💧', hasECG: false },
+  { id: 'gynecology', nameAr: 'طبيب نساء وتوليد', icon: '🤰', hasECG: false },
+  { id: 'psychiatry', nameAr: 'طبيب نفسي', icon: '🧘', hasECG: false },
+  { id: 'hematology', nameAr: 'طبيب دم', icon: '🩸', hasECG: false },
+  { id: 'oncology', nameAr: 'طبيب أورام', icon: '🎗️', hasECG: false },
+  { id: 'otolaryngology', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂', hasECG: false },
+  { id: 'ophthalmology', nameAr: 'طبيب عيون', icon: '👁️', hasECG: false },
+  { id: 'pediatrics', nameAr: 'طبيب أطفال', icon: '👶', hasECG: false },
+  { id: 'nephrology', nameAr: 'طبيب كلى', icon: '🫘', hasECG: false },
+  { id: 'internal_medicine', nameAr: 'طبيب باطنية', icon: '🏨', hasECG: false },
+  { id: 'emergency_medicine', nameAr: 'طبيب طوارئ', icon: '🚑', hasECG: false },
+  { id: 'vascular_surgery', nameAr: 'جراح أوعية دموية', icon: '🫀', hasECG: false },
+  { id: 'anesthesiology', nameAr: 'طبيب تخدير', icon: '💉', hasECG: false },
+  { id: 'radiology', nameAr: 'طبيب أشعة', icon: '📡', hasECG: false }
 ];
 
 const SYRIAN_GOVERNORATES = [
@@ -56,7 +56,7 @@ const SYRIAN_GOVERNORATES = [
   { id: 'hasakah', nameAr: 'الحسكة', nameEn: 'Al-Hasakah' },
   { id: 'raqqa', nameAr: 'الرقة', nameEn: 'Raqqa' },
   { id: 'daraa', nameAr: 'درعا', nameEn: 'Daraa' },
-  { id: 'suwayda', nameAr: 'السويداء', nameEn: 'As-Suwayda' },
+  { id: 'as_suwayda', nameAr: 'السويداء', nameEn: 'As-Suwayda' },
   { id: 'quneitra', nameAr: 'القنيطرة', nameEn: 'Quneitra' }
 ];
 
@@ -110,6 +110,14 @@ const SignUp = () => {
   const [checkingStatus, setCheckingStatus] = useState(false);
   const [existingRequest, setExistingRequest] = useState(null);
   
+  // Status Check Modal State
+  const [statusCheckModal, setStatusCheckModal] = useState({
+    isOpen: false,
+    nationalId: '',
+    isLoading: false,
+    error: ''
+  });
+  
   // ═══════════════════════════════════════════════════════════════
   // PATIENT FORM DATA
   // ═══════════════════════════════════════════════════════════════
@@ -118,10 +126,14 @@ const SignUp = () => {
     nationalId: '',
     parentNationalId: '',
     firstName: '',
+    fatherName: '',
     lastName: '',
+    motherName: '',
     dateOfBirth: '',
     gender: '',
     phoneNumber: '',
+    governorate: '',
+    city: '',
     address: '',
     email: '',
     password: '',
@@ -145,7 +157,9 @@ const SignUp = () => {
   const [doctorFormData, setDoctorFormData] = useState({
     // Personal Info
     firstName: '',
+    fatherName: '',
     lastName: '',
+    motherName: '',
     nationalId: '',
     dateOfBirth: '',
     gender: 'male',
@@ -184,8 +198,8 @@ const SignUp = () => {
   const bloodTypes = ['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-'];
   const smokingStatuses = [
     { value: 'non-smoker', label: 'غير مدخن' },
-    { value: 'former smoker', label: 'مدخن سابق' },
-    { value: 'current smoker', label: 'مدخن حالي' }
+    { value: 'former_smoker', label: 'مدخن سابق' },
+    { value: 'current_smoker', label: 'مدخن حالي' }
   ];
   
   // Total steps for each user type
@@ -301,12 +315,26 @@ const SignUp = () => {
         newErrors.firstName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
       }
       
+      if (!patientFormData.fatherName.trim()) {
+        newErrors.fatherName = 'اسم الأب مطلوب';
+      } else if (patientFormData.fatherName.trim().length < 2) {
+        newErrors.fatherName = 'اسم الأب يجب أن يكون حرفين على الأقل';
+      } else if (!isValidName(patientFormData.fatherName)) {
+        newErrors.fatherName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
+      }
+      
       if (!patientFormData.lastName.trim()) {
         newErrors.lastName = 'اسم العائلة مطلوب';
       } else if (patientFormData.lastName.trim().length < 2) {
         newErrors.lastName = 'اسم العائلة يجب أن يكون حرفين على الأقل';
       } else if (!isValidName(patientFormData.lastName)) {
         newErrors.lastName = 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط';
+      }
+      
+      if (!patientFormData.motherName.trim()) {
+        newErrors.motherName = 'اسم الأم مطلوب';
+      } else if (patientFormData.motherName.trim().length < 2) {
+        newErrors.motherName = 'اسم الأم يجب أن يكون حرفين على الأقل';
       }
       
       if (!patientFormData.email.trim()) {
@@ -344,11 +372,19 @@ const SignUp = () => {
       if (!patientFormData.gender) {
         newErrors.gender = 'يرجى اختيار الجنس';
       }
+      
+      if (!patientFormData.governorate) {
+        newErrors.governorate = 'المحافظة مطلوبة';
+      }
+      
+      if (!patientFormData.city.trim()) {
+        newErrors.city = 'المدينة مطلوبة';
+      }
     }
     
     if (currentStep === 2) {
-      if (patientFormData.height && (patientFormData.height < 50 || patientFormData.height > 250)) {
-        newErrors.height = 'الطول يجب أن يكون بين 50 و 250 سم';
+      if (patientFormData.height && (patientFormData.height < 50 || patientFormData.height > 300)) {
+        newErrors.height = 'الطول يجب أن يكون بين 50 و 300 سم';
       }
       if (patientFormData.weight && (patientFormData.weight < 2 || patientFormData.weight > 300)) {
         newErrors.weight = 'الوزن يجب أن يكون بين 2 و 300 كجم';
@@ -408,10 +444,20 @@ const validateDoctorStep = () => {
       newErrors.firstName = 'الاسم يجب أن يحتوي على أحرف فقط';
     }
     
+    if (!doctorFormData.fatherName.trim()) {
+      newErrors.fatherName = 'اسم الأب مطلوب';
+    } else if (!isValidName(doctorFormData.fatherName)) {
+      newErrors.fatherName = 'الاسم يجب أن يحتوي على أحرف فقط';
+    }
+    
     if (!doctorFormData.lastName.trim()) {
       newErrors.lastName = 'الكنية مطلوبة';
     } else if (!isValidName(doctorFormData.lastName)) {
       newErrors.lastName = 'الاسم يجب أن يحتوي على أحرف فقط';
+    }
+    
+    if (!doctorFormData.motherName.trim()) {
+      newErrors.motherName = 'اسم الأم مطلوب';
     }
     
     if (!doctorFormData.nationalId.trim()) {
@@ -440,7 +486,15 @@ const validateDoctorStep = () => {
       newErrors.governorate = 'المحافظة مطلوبة';
     }
     
-    // ✅ NEW: Password strength validation (same as Patient)
+    if (!doctorFormData.city.trim()) {
+      newErrors.city = 'المدينة مطلوبة';
+    }
+    
+    if (!doctorFormData.address.trim()) {
+      newErrors.address = 'العنوان مطلوب';
+    }
+    
+    // ✅ Password strength validation (same as Patient)
     if (!doctorFormData.password) {
       newErrors.password = 'كلمة المرور مطلوبة';
     } else if (doctorFormData.password.length < 8) {
@@ -483,6 +537,10 @@ const validateDoctorStep = () => {
     const years = parseInt(doctorFormData.yearsOfExperience);
     if (isNaN(years) || years < 0 || years > 60) {
       newErrors.yearsOfExperience = 'سنوات الخبرة يجب أن تكون بين 0-60';
+    }
+    
+    if (!doctorFormData.consultationFee || parseFloat(doctorFormData.consultationFee) < 0) {
+      newErrors.consultationFee = 'رسوم الاستشارة مطلوبة';
     }
   }
   
@@ -541,13 +599,17 @@ const validateDoctorStep = () => {
     try {
       const registrationData = {
         firstName: patientFormData.firstName.trim(),
+        fatherName: patientFormData.fatherName.trim(),
         lastName: patientFormData.lastName.trim(),
+        motherName: patientFormData.motherName.trim(),
         dateOfBirth: patientFormData.dateOfBirth,
         nationalId: isMinor ? null : patientFormData.nationalId.trim(),
         parentNationalId: isMinor ? patientFormData.parentNationalId.trim() : null,
         isMinor: isMinor,
         gender: patientFormData.gender,
         phoneNumber: patientFormData.phoneNumber.trim(),
+        governorate: patientFormData.governorate,
+        city: patientFormData.city.trim(),
         address: patientFormData.address.trim() || null,
         email: patientFormData.email.trim().toLowerCase(),
         password: patientFormData.password,
@@ -567,7 +629,7 @@ const validateDoctorStep = () => {
         emergencyContact: {
           name: patientFormData.emergencyContactName.trim(),
           relationship: patientFormData.emergencyContactRelationship.trim(),
-          phone: patientFormData.emergencyContactPhone.trim()
+          phoneNumber: patientFormData.emergencyContactPhone.trim()
         }
       };
       
@@ -618,7 +680,9 @@ const validateDoctorStep = () => {
       
       // Personal Info
       formData.append('firstName', doctorFormData.firstName.trim());
+      formData.append('fatherName', doctorFormData.fatherName.trim());
       formData.append('lastName', doctorFormData.lastName.trim());
+      formData.append('motherName', doctorFormData.motherName.trim());
       formData.append('nationalId', doctorFormData.nationalId.trim());
       formData.append('dateOfBirth', doctorFormData.dateOfBirth);
       formData.append('gender', doctorFormData.gender);
@@ -691,9 +755,88 @@ const validateDoctorStep = () => {
   };
   
   // ═══════════════════════════════════════════════════════════════
-  // CHECK EXISTING REQUEST STATUS
+  // STATUS CHECK MODAL FUNCTIONS
   // ═══════════════════════════════════════════════════════════════
   
+  const openStatusCheckModal = () => {
+    setStatusCheckModal({
+      isOpen: true,
+      nationalId: '',
+      isLoading: false,
+      error: ''
+    });
+  };
+  
+  const closeStatusCheckModal = () => {
+    setStatusCheckModal({
+      isOpen: false,
+      nationalId: '',
+      isLoading: false,
+      error: ''
+    });
+  };
+  
+  const handleStatusCheckSubmit = async () => {
+    const { nationalId } = statusCheckModal;
+    
+    // Validate input - using nationalId field as email
+    if (!nationalId.trim()) {
+      setStatusCheckModal(prev => ({ ...prev, error: 'الرجاء إدخال البريد الإلكتروني' }));
+      return;
+    }
+    
+    // Basic email validation
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(nationalId)) {
+      setStatusCheckModal(prev => ({ ...prev, error: 'البريد الإلكتروني غير صحيح' }));
+      return;
+    }
+    
+    setStatusCheckModal(prev => ({ ...prev, isLoading: true, error: '' }));
+    
+    try {
+      // ✅ UPDATED: Use new endpoint with email
+      const response = await fetch('http://localhost:5000/api/auth/check-doctor-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: statusCheckModal.nationalId  // Using nationalId field as email input
+        })
+      });
+      const data = await response.json();
+      
+      if (data.success) {
+        closeStatusCheckModal();
+        setExistingRequest({
+          status: data.status,
+          email: data.credentials?.email,
+          password: data.credentials?.password,
+          name: data.credentials?.name,
+          submittedAt: data.submittedAt,
+          reviewedAt: data.reviewedAt,
+          rejectionReason: data.rejectionReason,
+          message: data.message
+        });
+      } else {
+        setStatusCheckModal(prev => ({ 
+          ...prev, 
+          isLoading: false,
+          error: data.message || 'لم يتم العثور على طلب بهذا البريد الإلكتروني'
+        }));
+      }
+    } catch (error) {
+      console.error('Status check error:', error);
+      setStatusCheckModal(prev => ({ 
+        ...prev, 
+        isLoading: false,
+        error: 'حدث خطأ في الاتصال بالخادم'
+      }));
+    }
+  };
+  
+  // Legacy check status (keeping for backward compatibility)
   const handleCheckStatus = async () => {
     const nationalId = doctorFormData.nationalId.trim();
     
@@ -705,13 +848,31 @@ const validateDoctorStep = () => {
     setCheckingStatus(true);
     
     try {
-      const response = await fetch(`http://localhost:5000/api/auth/doctor-request/status/${nationalId}`);
+      // ✅ UPDATED: Use new endpoint with email
+      const response = await fetch('http://localhost:5000/api/auth/check-doctor-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json'
+        },
+        body: JSON.stringify({
+          email: doctorFormData.email.trim()
+        })
+      });
       const data = await response.json();
       
-      if (data.success && data.request) {
-        setExistingRequest(data.request);
+      if (data.success) {
+        setExistingRequest({
+          status: data.status,
+          email: data.credentials?.email,
+          password: data.credentials?.password,
+          name: data.credentials?.name,
+          submittedAt: data.submittedAt,
+          reviewedAt: data.reviewedAt,
+          rejectionReason: data.rejectionReason,
+          message: data.message
+        });
       } else {
-        openModal('info', 'لا يوجد طلب', 'لم يتم العثور على طلب تسجيل بهذا الرقم الوطني');
+        openModal('info', 'لا يوجد طلب', data.message || 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني');
       }
     } catch (error) {
       console.error('Status check error:', error);
@@ -818,9 +979,9 @@ const validateDoctorStep = () => {
   
   if (existingRequest) {
     const statusConfig = {
-      pending: { icon: '⏳', label: 'قيد المراجعة', className: 'status-pending', color: '#f59e0b' },
-      accepted: { icon: '✅', label: 'تم القبول', className: 'status-accepted', color: '#10b981' },
-      rejected: { icon: '❌', label: 'مرفوض', className: 'status-rejected', color: '#ef4444' }
+      pending: { icon: '⏳', label: 'قيد المراجعة', className: 'status-pending', color: 'var(--tm-warning)' },
+      approved: { icon: '✅', label: 'تم القبول', className: 'status-accepted', color: 'var(--tm-success)' },
+      rejected: { icon: '❌', label: 'مرفوض', className: 'status-rejected', color: 'var(--tm-error)' }
     };
     
     const status = statusConfig[existingRequest.status] || statusConfig.pending;
@@ -830,7 +991,7 @@ const validateDoctorStep = () => {
         <Navbar />
         <div className="signup-container">
           <div className="request-status-container">
-            <div className="status-card">
+            <div className="status-card enhanced">
               <div className={`status-icon ${existingRequest.status}`}>
                 <span className="status-icon-inner">{status.icon}</span>
                 {existingRequest.status === 'pending' && <div className="status-pulse"></div>}
@@ -840,22 +1001,22 @@ const validateDoctorStep = () => {
               <div className="status-details">
                 <div className="status-detail-row">
                   <span className="detail-label">الاسم:</span>
-                  <span className="detail-value">{existingRequest.firstName} {existingRequest.lastName}</span>
+                  <span className="detail-value">{existingRequest.name || `${existingRequest.firstName} ${existingRequest.lastName}`}</span>
                 </div>
                 <div className="status-detail-row">
-                  <span className="detail-label">التخصص:</span>
-                  <span className="detail-value">
-                    {MEDICAL_SPECIALIZATIONS.find(s => s.id === existingRequest.specialization)?.nameAr || existingRequest.specialization}
-                  </span>
+                  <span className="detail-label">البريد الإلكتروني:</span>
+                  <span className="detail-value" dir="ltr">{existingRequest.email}</span>
                 </div>
-                <div className="status-detail-row">
+                <div className="status-detail-row highlight">
                   <span className="detail-label">حالة الطلب:</span>
-                  <span className={`detail-value ${status.className}`}>{status.label}</span>
+                  <span className={`detail-value ${status.className}`}>
+                    <span className="status-badge">{status.icon} {status.label}</span>
+                  </span>
                 </div>
                 <div className="status-detail-row">
                   <span className="detail-label">تاريخ التقديم:</span>
                   <span className="detail-value">
-                    {new Date(existingRequest.createdAt).toLocaleDateString('ar-EG')}
+                    {existingRequest.submittedAt ? new Date(existingRequest.submittedAt).toLocaleDateString('ar-EG') : '-'}
                   </span>
                 </div>
                 {existingRequest.reviewedAt && (
@@ -868,6 +1029,16 @@ const validateDoctorStep = () => {
                 )}
               </div>
               
+              {existingRequest.status === 'pending' && (
+                <div className="status-info-box pending-info">
+                  <span className="info-icon">⏳</span>
+                  <div className="info-text">
+                    <p><strong>طلبك قيد المراجعة</strong></p>
+                    <p>سيتم مراجعة طلبك من قبل فريق وزارة الصحة السورية. ستتلقى إشعاراً عند اتخاذ القرار.</p>
+                  </div>
+                </div>
+              )}
+              
               {existingRequest.status === 'rejected' && existingRequest.rejectionReason && (
                 <div className="rejection-reason-box">
                   <span className="info-icon">⚠️</span>
@@ -878,13 +1049,23 @@ const validateDoctorStep = () => {
                 </div>
               )}
               
-              {existingRequest.status === 'accepted' && (
+              {existingRequest.status === 'approved' && existingRequest.password && (
                 <div className="success-info-box">
                   <span className="info-icon">🎉</span>
                   <div className="info-text">
-                    <p>تهانينا! تم قبول طلبك.</p>
-                    <p>تم إرسال بيانات الدخول إلى بريدك الإلكتروني.</p>
-                    <p>يمكنك الآن تسجيل الدخول إلى المنصة.</p>
+                    <p><strong>تهانينا! تم قبول طلبك.</strong></p>
+                    <p>يمكنك الآن تسجيل الدخول باستخدام البيانات التالية:</p>
+                    <div className="credentials-box">
+                      <div className="credential-item">
+                        <span className="credential-label">البريد الإلكتروني:</span>
+                        <span className="credential-value" dir="ltr">{existingRequest.email}</span>
+                      </div>
+                      <div className="credential-item">
+                        <span className="credential-label">كلمة المرور:</span>
+                        <span className="credential-value" dir="ltr">{existingRequest.password}</span>
+                      </div>
+                    </div>
+                    <p className="important-note">⚠️ احفظ هذه البيانات في مكان آمن</p>
                   </div>
                 </div>
               )}
@@ -894,7 +1075,7 @@ const validateDoctorStep = () => {
                   رجوع
                 </button>
                 <button className="btn-primary" onClick={() => navigate('/')}>
-                  {existingRequest.status === 'accepted' ? 'تسجيل الدخول' : 'الصفحة الرئيسية'}
+                  {existingRequest.status === 'approved' ? 'تسجيل الدخول' : 'الصفحة الرئيسية'}
                 </button>
               </div>
             </div>
@@ -953,7 +1134,7 @@ const validateDoctorStep = () => {
                   <span>👤</span>
                 </div>
                 <h3>تسجيل كمريض</h3>
-                <p>إنشاء حساب مريض جديد للوصول إلى خدمات الرعاية الصحية</p>
+                <p>إنشاء حساب   للوصول إلى خدمات الرعاية الصحية</p>
                 <ul className="type-features">
                   <li>✓ سجل طبي إلكتروني شامل</li>
                   <li>✓ حجز المواعيد</li>
@@ -996,27 +1177,110 @@ const validateDoctorStep = () => {
               </div>
               <div className="check-status-card">
                 <h4>لديك طلب تسجيل سابق؟</h4>
-                <p>تحقق من حالة طلبك باستخدام الرقم الوطني</p>
-                <div className="check-status-form">
-                  <input
-                    type="text"
-                    placeholder="أدخل الرقم الوطني (11 رقم)"
-                    value={doctorFormData.nationalId}
-                    onChange={(e) => setDoctorFormData(prev => ({ ...prev, nationalId: e.target.value.replace(/\D/g, '').slice(0, 11) }))}
-                    className="check-status-input"
-                    dir="ltr"
-                    maxLength={11}
-                  />
-                  <button
-                    className="check-status-btn"
-                    onClick={handleCheckStatus}
-                    disabled={checkingStatus}
-                  >
-                    {checkingStatus ? 'جاري البحث...' : 'تحقق من الحالة'}
-                  </button>
-                </div>
+                <p>تحقق من حالة طلبك باستخدام بيانات التسجيل</p>
+                <button
+                  className="check-status-btn"
+                  onClick={openStatusCheckModal}
+                >
+                  <span className="btn-icon">🔍</span>
+                  تحقق من الحالة
+                </button>
               </div>
             </div>
+            
+            {/* Status Check Modal */}
+            {statusCheckModal.isOpen && (
+              <div className="modal-overlay" onClick={closeStatusCheckModal}>
+                <div className="status-check-modal" onClick={e => e.stopPropagation()}>
+                  <div className="scm-header">
+                    <div className="scm-icon-wrapper">
+                      <div className="scm-icon">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M21 21L16.65 16.65M19 11C19 15.4183 15.4183 19 11 19C6.58172 19 3 15.4183 3 11C3 6.58172 6.58172 3 11 3C15.4183 3 19 6.58172 19 11Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                      </div>
+                      <div className="scm-icon-pulse"></div>
+                    </div>
+                    <h2>التحقق من حالة الطلب</h2>
+                    <p>أدخل البريد الإلكتروني المستخدم عند التسجيل للتحقق من حالة طلبك</p>
+                  </div>
+                  
+                  <div className="scm-body">
+                    {statusCheckModal.error && (
+                      <div className="scm-error">
+                        <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          <path d="M12 8V12M12 16H12.01M21 12C21 16.9706 16.9706 21 12 21C7.02944 21 3 16.9706 3 12C3 7.02944 7.02944 3 12 3C16.9706 3 21 7.02944 21 12Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                        </svg>
+                        <span>{statusCheckModal.error}</span>
+                      </div>
+                    )}
+                    
+                    <div className="scm-form-group">
+                      <label>البريد الإلكتروني</label>
+                      <div className="scm-input-wrapper">
+                        <span className="scm-input-icon">
+                          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="3" y="5" width="18" height="14" rx="2" stroke="currentColor" strokeWidth="2"/>
+                            <path d="M3 7L12 13L21 7" stroke="currentColor" strokeWidth="2" strokeLinecap="round"/>
+                          </svg>
+                        </span>
+                        <input
+                          type="email"
+                          placeholder="أدخل البريد الإلكتروني"
+                          value={statusCheckModal.nationalId}
+                          onChange={(e) => setStatusCheckModal(prev => ({ 
+                            ...prev, 
+                            nationalId: e.target.value.trim(),
+                            error: '' 
+                          }))}
+                          disabled={statusCheckModal.isLoading}
+                          dir="ltr"
+                          className="email-input"
+                        />
+                      </div>
+                      <div className="scm-input-hint">
+                        <span className="hint-icon">ℹ️</span>
+                        <span>البريد الإلكتروني المستخدم عند التسجيل</span>
+                      </div>
+                    </div>
+                    
+                    <button
+                      className="scm-submit-btn"
+                      onClick={handleStatusCheckSubmit}
+                      disabled={statusCheckModal.isLoading || !statusCheckModal.nationalId}
+                    >
+                      {statusCheckModal.isLoading ? (
+                        <span className="scm-loading">
+                          <span className="scm-spinner"></span>
+                          جارٍ البحث...
+                        </span>
+                      ) : (
+                        <>
+                          <span>التحقق من الحالة</span>
+                          <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <path d="M5 12H19M19 12L13 6M19 12L13 18" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                          </svg>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                  
+                  <div className="scm-footer">
+                    <button className="scm-close-btn" onClick={closeStatusCheckModal}>
+                      إلغاء
+                    </button>
+                  </div>
+                  
+                  <div className="scm-security-note">
+                    <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <path d="M12 22C12 22 20 18 20 12V5L12 2L4 5V12C4 18 12 22 12 22Z" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                      <path d="M9 12L11 14L15 10" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"/>
+                    </svg>
+                    <span>بياناتك محمية ومشفرة</span>
+                  </div>
+                </div>
+              </div>
+            )}
             
             <div className="login-link">
               لديك حساب بالفعل؟ <Link to="/">تسجيل الدخول</Link>
@@ -1123,6 +1387,22 @@ const validateDoctorStep = () => {
                     </div>
                     
                     <div className="form-group">
+                      <label className="form-label">اسم الأب *</label>
+                      <input
+                        type="text"
+                        name="fatherName"
+                        className={`form-input ${errors.fatherName ? 'error' : ''}`}
+                        value={patientFormData.fatherName}
+                        onChange={handlePatientChange}
+                        placeholder="أدخل اسم الأب"
+                        maxLength={50}
+                      />
+                      {errors.fatherName && <span className="error-message">{errors.fatherName}</span>}
+                    </div>
+                  </div>
+                  
+                  <div className="form-row">
+                    <div className="form-group">
                       <label className="form-label">اسم العائلة *</label>
                       <input
                         type="text"
@@ -1134,6 +1414,20 @@ const validateDoctorStep = () => {
                         maxLength={50}
                       />
                       {errors.lastName && <span className="error-message">{errors.lastName}</span>}
+                    </div>
+                    
+                    <div className="form-group">
+                      <label className="form-label">اسم الأم الكامل *</label>
+                      <input
+                        type="text"
+                        name="motherName"
+                        className={`form-input ${errors.motherName ? 'error' : ''}`}
+                        value={patientFormData.motherName}
+                        onChange={handlePatientChange}
+                        placeholder="أدخل اسم الأم الكامل"
+                        maxLength={100}
+                      />
+                      {errors.motherName && <span className="error-message">{errors.motherName}</span>}
                     </div>
                   </div>
                   
@@ -1245,6 +1539,37 @@ const validateDoctorStep = () => {
                     {errors.phoneNumber && <span className="error-message">{errors.phoneNumber}</span>}
                   </div>
                   
+                  <div className="form-row">
+                    <div className="form-group">
+                      <label className="form-label">المحافظة *</label>
+                      <select
+                        name="governorate"
+                        className={`form-input ${errors.governorate ? 'error' : ''}`}
+                        value={patientFormData.governorate}
+                        onChange={handlePatientChange}
+                      >
+                        <option value="">اختر المحافظة</option>
+                        {SYRIAN_GOVERNORATES.map(gov => (
+                          <option key={gov.id} value={gov.id}>{gov.nameAr}</option>
+                        ))}
+                      </select>
+                      {errors.governorate && <span className="error-message">{errors.governorate}</span>}
+                    </div>
+                    
+                    <div className="form-group">
+                      <label className="form-label">المدينة *</label>
+                      <input
+                        type="text"
+                        name="city"
+                        className={`form-input ${errors.city ? 'error' : ''}`}
+                        value={patientFormData.city}
+                        onChange={handlePatientChange}
+                        placeholder="أدخل المدينة"
+                      />
+                      {errors.city && <span className="error-message">{errors.city}</span>}
+                    </div>
+                  </div>
+                  
                   <div className="form-group">
                     <label className="form-label">العنوان</label>
                     <input
@@ -1253,7 +1578,7 @@ const validateDoctorStep = () => {
                       className={`form-input ${errors.address ? 'error' : ''}`}
                       value={patientFormData.address}
                       onChange={handlePatientChange}
-                      placeholder="المدينة، الحي، الشارع"
+                      placeholder="الحي، الشارع، البناء"
                     />
                     {errors.address && <span className="error-message">{errors.address}</span>}
                   </div>
@@ -1289,7 +1614,7 @@ const validateDoctorStep = () => {
                         onChange={handlePatientChange}
                         placeholder="مثال: 175"
                         min="50"
-                        max="250"
+                        max="300"
                       />
                       {errors.height && <span className="error-message">{errors.height}</span>}
                     </div>
@@ -1629,6 +1954,21 @@ const validateDoctorStep = () => {
                   </div>
                   
                   <div className="form-group">
+                    <label className="form-label">اسم الأب *</label>
+                    <input
+                      type="text"
+                      name="fatherName"
+                      className={`form-input ${errors.fatherName ? 'error' : ''}`}
+                      value={doctorFormData.fatherName}
+                      onChange={handleDoctorChange}
+                      placeholder="أدخل اسم الأب"
+                    />
+                    {errors.fatherName && <span className="error-message">{errors.fatherName}</span>}
+                  </div>
+                </div>
+                
+                <div className="form-row">
+                  <div className="form-group">
                     <label className="form-label">الكنية *</label>
                     <input
                       type="text"
@@ -1639,6 +1979,19 @@ const validateDoctorStep = () => {
                       placeholder="أدخل الكنية"
                     />
                     {errors.lastName && <span className="error-message">{errors.lastName}</span>}
+                  </div>
+                  
+                  <div className="form-group">
+                    <label className="form-label">اسم الأم الكامل *</label>
+                    <input
+                      type="text"
+                      name="motherName"
+                      className={`form-input ${errors.motherName ? 'error' : ''}`}
+                      value={doctorFormData.motherName}
+                      onChange={handleDoctorChange}
+                      placeholder="أدخل اسم الأم الكامل"
+                    />
+                    {errors.motherName && <span className="error-message">{errors.motherName}</span>}
                   </div>
                 </div>
                 
@@ -1766,28 +2119,30 @@ const validateDoctorStep = () => {
                   </div>
                   
                   <div className="form-group">
-                    <label className="form-label">المدينة</label>
+                    <label className="form-label">المدينة *</label>
                     <input
                       type="text"
                       name="city"
-                      className="form-input"
+                      className={`form-input ${errors.city ? 'error' : ''}`}
                       value={doctorFormData.city}
                       onChange={handleDoctorChange}
                       placeholder="أدخل المدينة"
                     />
+                    {errors.city && <span className="error-message">{errors.city}</span>}
                   </div>
                 </div>
                 
                 <div className="form-group">
-                  <label className="form-label">عنوان العيادة</label>
+                  <label className="form-label">عنوان العيادة *</label>
                   <input
                     type="text"
                     name="address"
-                    className="form-input"
+                    className={`form-input ${errors.address ? 'error' : ''}`}
                     value={doctorFormData.address}
                     onChange={handleDoctorChange}
                     placeholder="العنوان التفصيلي للعيادة"
                   />
+                  {errors.address && <span className="error-message">{errors.address}</span>}
                 </div>
               </div>
             )}
@@ -1829,7 +2184,7 @@ const validateDoctorStep = () => {
                   {errors.specialization && <span className="error-message">{errors.specialization}</span>}
                   
                   {/* ECG AI Notice for Cardiologists */}
-                  {doctorFormData.specialization === 'Cardiologist' && (
+                  {doctorFormData.specialization === 'cardiology' && (
                     <div className="ecg-notice">
                       <span className="ecg-icon">🤖❤️</span>
                       <span>كطبيب قلب، ستتمكن من استخدام نظام AI لتحليل تخطيط القلب (ECG)</span>
@@ -2018,7 +2373,11 @@ const validateDoctorStep = () => {
                     <div className="review-grid">
                       <div className="review-item">
                         <span className="review-label">الاسم:</span>
-                        <span className="review-value">{doctorFormData.firstName} {doctorFormData.lastName}</span>
+                        <span className="review-value">{doctorFormData.firstName} {doctorFormData.fatherName} {doctorFormData.lastName}</span>
+                      </div>
+                      <div className="review-item">
+                        <span className="review-label">اسم الأم:</span>
+                        <span className="review-value">{doctorFormData.motherName}</span>
                       </div>
                       <div className="review-item">
                         <span className="review-label">الرقم الوطني:</span>
@@ -2053,7 +2412,7 @@ const validateDoctorStep = () => {
                         <span className="review-label">التخصص:</span>
                         <span className="review-value">
                           {MEDICAL_SPECIALIZATIONS.find(s => s.id === doctorFormData.specialization)?.nameAr}
-                          {doctorFormData.specialization === 'Cardiologist' && ' 🤖❤️'}
+                          {doctorFormData.specialization === 'cardiology' && ' 🤖❤️'}
                         </span>
                       </div>
                       <div className="review-item">

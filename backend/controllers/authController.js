@@ -114,33 +114,74 @@ exports.signup = async (req, res) => {
     // ========================================
     // 3. التحقق من عدم وجود حساب مسبق
     // ========================================
-    console.log('🔍 Checking for existing account...');
-    const existingAccount = await Account.findOne({ email: email.toLowerCase() });
-    if (existingAccount) {
-      console.log('❌ Email already exists');
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني مستخدم بالفعل'
-      });
-    }
+    console.log('🔍 Checking for existing account/person...');
 
     if (!isMinor) {
-  console.log('🔍 Checking for existing person (adult)...');
-  console.log('🔎 National ID being checked:', nationalId);
-  console.log('🔎 National ID type:', typeof nationalId);
-  
-  const existingPerson = await Person.findOne({ nationalId });
-  if (existingPerson) {
-    console.log('❌ National ID already exists');
-    console.log('🔎 Existing person:', existingPerson);
-    return res.status(400).json({
-      success: false,
-      message: 'رقم الهوية الوطنية مستخدم بالفعل'
-    });
-  }
-}
+      // ✅ ADULTS: Check both email and nationalId
+      console.log('👤 Adult registration - checking email and nationalId...');
+      
+      // Check email
+      const existingAccount = await Account.findOne({ email: email.toLowerCase() });
+      if (existingAccount) {
+        console.log('❌ Email already exists');
+        return res.status(400).json({
+          success: false,
+          message: 'البريد الإلكتروني مستخدم بالفعل'
+        });
+      }
+      
+      // Check nationalId
+      console.log('🔎 Checking national ID:', nationalId);
+      console.log('🔎 National ID type:', typeof nationalId);
+      
+      const existingPerson = await Person.findOne({ nationalId });
+      if (existingPerson) {
+        console.log('❌ National ID already exists');
+        console.log('🔎 Existing person:', existingPerson);
+        return res.status(400).json({
+          success: false,
+          message: 'رقم الهوية الوطنية مستخدم بالفعل'
+        });
+      }
+      
+      console.log('✅ Adult: No duplicates found');
+      
+    } else {
+      // ✅ CHILDREN: NO email check (children use parent's account)
+      console.log('👶 Child registration - verifying parent exists...');
+      
+      // Verify parent exists
+      const parentPerson = await Person.findOne({ nationalId: parentNationalId });
+      if (!parentPerson) {
+        console.log('❌ Parent not found with nationalId:', parentNationalId);
+        return res.status(404).json({
+          success: false,
+          message: 'لم يتم العثور على حساب الوالد/الوالدة. يجب تسجيل الوالد أولاً'
+        });
+      }
+      
+      console.log('✅ Parent found:', parentPerson.firstName, parentPerson.lastName);
+      console.log('✅ Parent ID:', parentPerson._id);
+      
+      // Count existing children for this parent
+      const existingChildrenCount = await Person.countDocuments({ 
+        parentNationalId: parentNationalId 
+      });
+      
+      console.log(`✅ Parent currently has ${existingChildrenCount} existing children`);
+      
+      if (existingChildrenCount >= 999) {
+        console.log('❌ Parent has reached maximum children limit (999)');
+        return res.status(400).json({
+          success: false,
+          message: 'تم الوصول للحد الأقصى من الأطفال المسموح به (999 طفل)'
+        });
+      }
+      
+      console.log('✅ Child: Parent verified, can proceed with registration');
+    }
 
-    console.log('✅ Step 3: No duplicate accounts found');
+    console.log('✅ Step 3: Validation passed - No duplicates found');
 
     // ========================================
     // 4. التحقق من صحة تاريخ الميلاد
@@ -1178,6 +1219,101 @@ exports.resetPassword = async (req, res) => {
     res.status(500).json({
       success: false,
       message: 'حدث خطأ في تغيير كلمة المرور'
+    });
+  }
+};
+
+// ==========================================
+// ✅ NEW: CHECK DOCTOR REQUEST STATUS
+// ==========================================
+
+/**
+ * @route   POST /api/auth/check-doctor-status
+ * @desc    Check doctor registration request status and get credentials if approved
+ * @access  Public
+ */
+exports.checkDoctorRequestStatus = async (req, res) => {
+  try {
+    console.log('========================================');
+    console.log('🔍 CHECK DOCTOR REQUEST STATUS');
+    console.log('========================================');
+
+    const { email } = req.body;
+
+    // Validation
+    if (!email) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مطلوب'
+      });
+    }
+
+    console.log('📧 Checking status for email:', email);
+
+    // Find the request
+    const DoctorRequest = require('../models/DoctorRequest');
+    const request = await DoctorRequest.findOne({ 
+      email: email.toLowerCase() 
+    })
+      .select('status email plainPassword firstName lastName createdAt reviewedAt rejectionReason')
+      .lean();
+
+    if (!request) {
+      console.log('❌ No request found for this email');
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني'
+      });
+    }
+
+    console.log('✅ Request found');
+    console.log('Status:', request.status);
+
+    // Build response based on status
+    const response = {
+      success: true,
+      status: request.status,
+      submittedAt: request.createdAt
+    };
+
+    if (request.status === 'pending') {
+      console.log('⏳ Request is still pending');
+      response.message = 'طلبك قيد المراجعة من قبل الإدارة';
+      
+    } else if (request.status === 'approved') {
+      console.log('✅ Request is approved');
+      console.log('📧 Email:', request.email);
+      console.log('🔑 Password available:', !!request.plainPassword);
+      
+      response.message = 'تم قبول طلبك! يمكنك الآن تسجيل الدخول';
+      response.credentials = {
+        email: request.email,
+        password: request.plainPassword, // ✅ Return plain password
+        name: `${request.firstName} ${request.lastName}`
+      };
+      response.reviewedAt = request.reviewedAt;
+      
+    } else if (request.status === 'rejected') {
+      console.log('❌ Request was rejected');
+      response.message = 'تم رفض طلبك';
+      response.rejectionReason = request.rejectionReason || 'لم يتم تحديد سبب';
+      response.reviewedAt = request.reviewedAt;
+    }
+
+    console.log('========================================');
+    console.log('✅ Status check complete');
+    console.log('========================================');
+
+    res.status(200).json(response);
+
+  } catch (error) {
+    console.error('========================================');
+    console.error('❌ ERROR in checkDoctorRequestStatus:', error);
+    console.error('========================================');
+
+    res.status(500).json({
+      success: false,
+      message: 'حدث خطأ أثناء التحقق من حالة الطلب'
     });
   }
 };

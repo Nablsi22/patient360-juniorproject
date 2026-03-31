@@ -17,7 +17,7 @@ const { auditLog } = require('../middleware/auditLog');
  * 2. Patient role only (restrictTo('patient'))
  * 3. Ownership verification (verifyPatientOwnership)
  * 4. Audit logging
- */
+ *
 
 // ==========================================
 // PATIENT PROFILE ROUTES
@@ -130,21 +130,6 @@ router.get(
 // ==========================================
 // MEDICATION ROUTES
 // ==========================================
-
-/**
- * @route   GET /api/patient/medications/schedule
- * @desc    Get weekly medication schedule
- * @access  Private (Patient only)
- * @note    This route MUST come before /medications/:id to avoid conflicts
- */
-router.get(
-  '/medications/schedule',
-  protect,
-  restrictTo('patient'),
-  verifyPatientOwnership,
-  auditLog('MEDICATION'),
-  medicationController.getMedicationSchedule
-);
 
 /**
  * @route   GET /api/patient/medications/history

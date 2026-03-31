@@ -8,6 +8,7 @@ import React, { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import Navbar from '../components/common/Navbar';
 import { authAPI } from '../services/api';
+import { useTheme } from '../context/ThemeProvider';
 import '../styles/AdminDashboard.css';
 
 // ============================================
@@ -193,7 +194,7 @@ const ResponsiveModal = ({
  * 
  * DOCTOR_REQUESTS COLLECTION (NEW):
  * - All doctor fields + personal fields
- * - status: 'pending' | 'accepted' | 'rejected'
+ * - status: 'pending' | 'approved' | 'rejected'
  * - rejectionReason: string | null
  * - requestId: unique string
  * - createdAt, reviewedAt, reviewedBy
@@ -219,7 +220,7 @@ const SYRIAN_GOVERNORATES = [
   { id: 'hasakah', nameAr: 'الحسكة', nameEn: 'Al-Hasakah' },
   { id: 'raqqa', nameAr: 'الرقة', nameEn: 'Raqqa' },
   { id: 'daraa', nameAr: 'درعا', nameEn: 'Daraa' },
-  { id: 'suwayda', nameAr: 'السويداء', nameEn: 'As-Suwayda' },
+  { id: 'as_suwayda', nameAr: 'السويداء', nameEn: 'As-Suwayda' },
   { id: 'quneitra', nameAr: 'القنيطرة', nameEn: 'Quneitra' }
 ];
 
@@ -228,30 +229,30 @@ const SYRIAN_GOVERNORATES = [
  * IMPORTANT: id must match pattern ^[a-zA-Z\s-]+$ (English only, letters/spaces/hyphens)
  */
 const MEDICAL_SPECIALIZATIONS = [
-  { id: 'Cardiologist', nameAr: 'طبيب قلب', icon: '❤️', hasECG: true },
-  { id: 'Pulmonologist', nameAr: 'طبيب أمراض الرئة', icon: '🫁', hasECG: false },
-  { id: 'General Practitioner', nameAr: 'طبيب عام', icon: '🩺', hasECG: false },
-  { id: 'Infectious Disease Specialist', nameAr: 'طبيب أمراض معدية', icon: '🦠', hasECG: false },
-  { id: 'Intensive Care Specialist', nameAr: 'طبيب عناية مركزة', icon: '🏥', hasECG: false },
-  { id: 'Rheumatologist', nameAr: 'طبيب روماتيزم', icon: '🦴', hasECG: false },
-  { id: 'Orthopedic Surgeon', nameAr: 'جراح عظام', icon: '🦿', hasECG: false },
-  { id: 'Neurologist', nameAr: 'طبيب أعصاب', icon: '🧠', hasECG: false },
-  { id: 'Endocrinologist', nameAr: 'طبيب غدد صماء', icon: '⚗️', hasECG: false },
-  { id: 'Dermatologist', nameAr: 'طبيب جلدية', icon: '🧴', hasECG: false },
-  { id: 'Gastroenterologist', nameAr: 'طبيب جهاز هضمي', icon: '🫃', hasECG: false },
-  { id: 'General Surgeon', nameAr: 'جراح عام', icon: '🔪', hasECG: false },
-  { id: 'Hepatologist', nameAr: 'طبيب كبد', icon: '🫀', hasECG: false },
-  { id: 'Urologist', nameAr: 'طبيب مسالك بولية', icon: '💧', hasECG: false },
-  { id: 'Gynecologist', nameAr: 'طبيب نساء وتوليد', icon: '🤰', hasECG: false },
-  { id: 'Psychiatrist', nameAr: 'طبيب نفسي', icon: '🧘', hasECG: false },
-  { id: 'Hematologist', nameAr: 'طبيب دم', icon: '🩸', hasECG: false },
-  { id: 'Oncologist', nameAr: 'طبيب أورام', icon: '🎗️', hasECG: false },
-  { id: 'ENT Specialist', nameAr: 'طبيب أنف أذن حنجرة', icon: '👂', hasECG: false },
-  { id: 'Ophthalmologist', nameAr: 'طبيب عيون', icon: '👁️', hasECG: false },
-  { id: 'Pediatrician', nameAr: 'طبيب أطفال', icon: '👶', hasECG: false },
-  { id: 'Nephrologist', nameAr: 'طبيب كلى', icon: '🫘', hasECG: false },
-  { id: 'Internal Medicine', nameAr: 'طبيب باطنية', icon: '🏨', hasECG: false },
-  { id: 'Emergency Medicine', nameAr: 'طبيب طوارئ', icon: '🚑', hasECG: false }
+  { id: 'cardiology', nameAr: 'طب القلب', icon: '❤️', hasECG: true },
+  { id: 'pulmonology', nameAr: 'طب الرئة', icon: '🫁', hasECG: false },
+  { id: 'general_practice', nameAr: 'طب عام', icon: '🩺', hasECG: false },
+  { id: 'rheumatology', nameAr: 'طب الروماتيزم', icon: '🦴', hasECG: false },
+  { id: 'orthopedics', nameAr: 'جراحة العظام', icon: '🦿', hasECG: false },
+  { id: 'neurology', nameAr: 'طب الأعصاب', icon: '🧠', hasECG: false },
+  { id: 'endocrinology', nameAr: 'طب الغدد الصماء', icon: '⚗️', hasECG: false },
+  { id: 'dermatology', nameAr: 'طب الجلدية', icon: '🧴', hasECG: false },
+  { id: 'gastroenterology', nameAr: 'طب الجهاز الهضمي', icon: '🫃', hasECG: false },
+  { id: 'surgery', nameAr: 'الجراحة العامة', icon: '🔪', hasECG: false },
+  { id: 'urology', nameAr: 'طب المسالك البولية', icon: '💧', hasECG: false },
+  { id: 'gynecology', nameAr: 'طب النساء والتوليد', icon: '🤰', hasECG: false },
+  { id: 'psychiatry', nameAr: 'الطب النفسي', icon: '🧘', hasECG: false },
+  { id: 'hematology', nameAr: 'طب الدم', icon: '🩸', hasECG: false },
+  { id: 'oncology', nameAr: 'طب الأورام', icon: '🎗️', hasECG: false },
+  { id: 'otolaryngology', nameAr: 'أنف أذن حنجرة', icon: '👂', hasECG: false },
+  { id: 'ophthalmology', nameAr: 'طب العيون', icon: '👁️', hasECG: false },
+  { id: 'pediatrics', nameAr: 'طب الأطفال', icon: '👶', hasECG: false },
+  { id: 'nephrology', nameAr: 'طب الكلى', icon: '🫘', hasECG: false },
+  { id: 'internal_medicine', nameAr: 'الطب الباطني', icon: '🏨', hasECG: false },
+  { id: 'emergency_medicine', nameAr: 'طب الطوارئ', icon: '🚑', hasECG: false },
+  { id: 'vascular_surgery', nameAr: 'جراحة الأوعية', icon: '🫀', hasECG: false },
+  { id: 'anesthesiology', nameAr: 'طب التخدير', icon: '💉', hasECG: false },
+  { id: 'radiology', nameAr: 'الأشعة التشخيصية', icon: '📡', hasECG: false }
 ];
 
 /**
@@ -272,13 +273,13 @@ const WEEKDAYS = [
  * Deactivation Reasons
  */
 const DEACTIVATION_REASONS = [
-  { id: 'death', nameAr: 'وفاة', icon: '🕊️' },
-  { id: 'license_revoked', nameAr: 'إلغاء الترخيص', icon: '🚫' },
-  { id: 'user_request', nameAr: 'طلب المستخدم', icon: '📝' },
-  { id: 'fraud', nameAr: 'احتيال', icon: '⚠️' },
+  { id: 'voluntary', nameAr: 'طلب المستخدم', icon: '📝' },
+  { id: 'administrative', nameAr: 'قرار إداري', icon: '🏛️' },
+  { id: 'security', nameAr: 'أسباب أمنية', icon: '🔒' },
   { id: 'retirement', nameAr: 'تقاعد', icon: '🏖️' },
-  { id: 'transfer', nameAr: 'نقل', icon: '🔄' },
-  { id: 'other', nameAr: 'سبب آخر', icon: '📋' }
+  { id: 'deceased', nameAr: 'وفاة', icon: '🕊️' },
+  { id: 'duplicate', nameAr: 'حساب مكرر', icon: '🔄' },
+  { id: 'fraud', nameAr: 'احتيال', icon: '⚠️' }
 ];
 
 /**
@@ -286,10 +287,10 @@ const DEACTIVATION_REASONS = [
  */
 const REJECTION_REASONS = [
   { id: 'invalid_license', nameAr: 'رقم ترخيص غير صالح', icon: '🚫' },
-  { id: 'incomplete_documents', nameAr: 'وثائق غير مكتملة', icon: '📄' },
-  { id: 'unverifiable_info', nameAr: 'معلومات غير قابلة للتحقق', icon: '❓' },
-  { id: 'duplicate_request', nameAr: 'طلب مكرر', icon: '🔄' },
-  { id: 'suspended_license', nameAr: 'ترخيص موقوف', icon: '⏸️' },
+  { id: 'fake_documents', nameAr: 'وثائق مزورة', icon: '⚠️' },
+  { id: 'incomplete_info', nameAr: 'معلومات غير مكتملة', icon: '📄' },
+  { id: 'duplicate', nameAr: 'طلب مكرر', icon: '🔄' },
+  { id: 'license_expired', nameAr: 'ترخيص منتهي الصلاحية', icon: '⏰' },
   { id: 'other', nameAr: 'سبب آخر', icon: '📋' }
 ];
 
@@ -396,6 +397,7 @@ const StatCard = ({ icon, value, label, sublabel, color, onClick, badge }) => (
 
 const AdminDashboard = () => {
   const navigate = useNavigate();
+  const { theme } = useTheme();
   
   // Core State
   const [admin, setAdmin] = useState(null);
@@ -451,7 +453,9 @@ const AdminDashboard = () => {
   const [newDoctor, setNewDoctor] = useState({
     // === PERSONS COLLECTION FIELDS ===
     firstName: '',
+    fatherName: '',
     lastName: '',
+    motherName: '',
     nationalId: '',           // unique in persons
     phoneNumber: '',
     gender: 'male',
@@ -462,12 +466,13 @@ const AdminDashboard = () => {
     
     // === DOCTORS COLLECTION FIELDS (strict schema) ===
     medicalLicenseNumber: '', // required, pattern: ^[A-Z0-9]{8,20}$
-    specialization: '',       // required, pattern: ^[a-zA-Z\s-]+$, 3-100 chars
-    subSpecialization: '',    // optional, 3-100 chars or null
+    specialization: '',       // required — must match DB enum
+    subSpecialization: '',    // optional
     yearsOfExperience: '',    // int, 0-60
-    hospitalAffiliation: '',  // string, 3-150 chars
-    availableDays: [],        // array[1-7], enum weekdays
-    consultationFee: ''       // int|double, 0-1000000
+    hospitalAffiliation: '',  // string
+    availableDays: [],        // array, enum weekdays
+    consultationFee: '',      // number, minimum 0
+    currency: 'SYP'           // enum: SYP | USD
   });
   const [newDoctorCredentials, setNewDoctorCredentials] = useState(null);
   
@@ -1341,12 +1346,12 @@ const handleRejectRequest = async () => {
                     <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'pending').length}</span>
                   </button>
                   <button 
-                    className={`filter-chip accepted ${requestFilter === 'accepted' ? 'active' : ''}`}
-                    onClick={() => setRequestFilter('accepted')}
+                    className={`filter-chip accepted ${requestFilter === 'approved' ? 'active' : ''}`}
+                    onClick={() => setRequestFilter('approved')}
                   >
                     <span className="chip-icon">✅</span>
-                    <span className="chip-text">مقبول</span>
-                    <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'accepted').length}</span>
+                    <span className="chip-text">تمت الموافقة</span>
+                    <span className="chip-count">{doctorRequests.filter(r => r.requestInfo?.status === 'approved').length}</span>
                   </button>
                   <button 
                     className={`filter-chip rejected ${requestFilter === 'rejected' ? 'active' : ''}`}
@@ -1417,7 +1422,7 @@ const handleRejectRequest = async () => {
                             <td>
                               <span className={`status-pill status-${request.requestInfo?.status}`}>
                                 {request.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
-                                {request.requestInfo?.status === 'accepted' && '✅ مقبول'}
+                                {request.requestInfo?.status === 'approved' && '✅ تمت الموافقة'}
                                 {request.requestInfo?.status === 'rejected' && '❌ مرفوض'}
                               </span>
                             </td>
@@ -2451,7 +2456,7 @@ const handleRejectRequest = async () => {
                 <h2>تفاصيل طلب التسجيل</h2>
                 <span className={`status-pill large status-${selectedRequest.requestInfo?.status}`}>
                   {selectedRequest.requestInfo?.status === 'pending' && '⏳ قيد المراجعة'}
-                  {selectedRequest.requestInfo?.status === 'accepted' && '✅ تم القبول'}
+                  {selectedRequest.requestInfo?.status === 'approved' && '✅ تمت الموافقة'}
                   {selectedRequest.requestInfo?.status === 'rejected' && '❌ مرفوض'}
                 </span>
               </div>

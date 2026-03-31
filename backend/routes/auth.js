@@ -26,6 +26,15 @@ router.post('/register-doctor',
   authController.registerDoctorRequest
 );
 
+// ✅ NEW: Check Doctor Request Status
+/**
+ * @route   POST /api/auth/check-doctor-status
+ * @desc    Check doctor registration request status and get credentials if approved
+ * @access  Public
+ * @body    { email: String }
+ */
+router.post('/check-doctor-status', authController.checkDoctorRequestStatus);
+
 // Login
 router.post('/login', authController.login);
 

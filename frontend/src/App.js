@@ -6,6 +6,8 @@ import PatientDashboard from './pages/PatientDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
 import { initializeAdminAccount } from './services/adminService';
+import ThemeProvider from './context/ThemeProvider';
+
 
 /**
  * Main App Component
@@ -22,29 +24,31 @@ function App() {
   }, []);
 
   return (
-    <Router>
-      <div className="App">
-        <Routes>
-          {/* Home/Login Route */}
-          <Route path="/" element={<Login />} />
-          
-          {/* SignUp Route */}
-          <Route path="/signup" element={<SignUp />} />
-          
-          {/* Patient Dashboard Route */}
-          <Route path="/patient-dashboard" element={<PatientDashboard />} />
-          
-          {/* Doctor Dashboard Route */}
-          <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
-          
-          {/* Admin Dashboard Route */}
-          <Route path="/admin-dashboard" element={<AdminDashboard />} />
-          
-          {/* Catch all - redirect to home */}
-          <Route path="*" element={<Navigate to="/" replace />} />
-        </Routes>
-      </div>
-    </Router>
+    <ThemeProvider>
+      <Router>
+        <div className="App">
+          <Routes>
+            {/* Home/Login Route */}
+            <Route path="/" element={<Login />} />
+            
+            {/* SignUp Route */}
+            <Route path="/signup" element={<SignUp />} />
+            
+            {/* Patient Dashboard Route */}
+            <Route path="/patient-dashboard" element={<PatientDashboard />} />
+            
+            {/* Doctor Dashboard Route */}
+            <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
+            
+            {/* Admin Dashboard Route */}
+            <Route path="/admin-dashboard" element={<AdminDashboard />} />
+            
+            {/* Catch all - redirect to home */}
+            <Route path="*" element={<Navigate to="/" replace />} />
+          </Routes>
+        </div>
+      </Router>
+    </ThemeProvider>
   );
 }
 

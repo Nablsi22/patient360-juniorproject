@@ -30,7 +30,6 @@ api.interceptors.request.use(
 api.interceptors.response.use(
   (response) => response,
   (error) => {
-    // ✅ FIXED: Only redirect to login if user is already logged in and gets 401
     // Don't redirect during login attempt itself
     if (error.response?.status === 401) {
       const isLoginAttempt = error.config?.url?.includes('/auth/login');
