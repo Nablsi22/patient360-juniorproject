@@ -5,9 +5,9 @@ import SignUp from './pages/SignUp';
 import PatientDashboard from './pages/PatientDashboard';
 import DoctorDashboard from './pages/DoctorDashboard';
 import AdminDashboard from './pages/AdminDashboard';
+import PharmacistDashboard from './pages/PharmacistDashboard';
+import LabDashboard from './pages/LabDashboard';
 import { initializeAdminAccount } from './services/adminService';
-import ThemeProvider from './context/ThemeProvider';
-
 
 /**
  * Main App Component
@@ -24,31 +24,35 @@ function App() {
   }, []);
 
   return (
-    <ThemeProvider>
-      <Router>
-        <div className="App">
-          <Routes>
-            {/* Home/Login Route */}
-            <Route path="/" element={<Login />} />
-            
-            {/* SignUp Route */}
-            <Route path="/signup" element={<SignUp />} />
-            
-            {/* Patient Dashboard Route */}
-            <Route path="/patient-dashboard" element={<PatientDashboard />} />
-            
-            {/* Doctor Dashboard Route */}
-            <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
-            
-            {/* Admin Dashboard Route */}
-            <Route path="/admin-dashboard" element={<AdminDashboard />} />
-            
-            {/* Catch all - redirect to home */}
-            <Route path="*" element={<Navigate to="/" replace />} />
-          </Routes>
-        </div>
-      </Router>
-    </ThemeProvider>
+    <Router>
+      <div className="App">
+        <Routes>
+          {/* Home/Login Route */}
+          <Route path="/" element={<Login />} />
+          
+          {/* SignUp Route */}
+          <Route path="/signup" element={<SignUp />} />
+          
+          {/* Patient Dashboard Route */}
+          <Route path="/patient-dashboard" element={<PatientDashboard />} />
+          
+          {/* Doctor Dashboard Route */}
+          <Route path="/doctor-dashboard" element={<DoctorDashboard />} />
+          
+          {/* Admin Dashboard Route */}
+          <Route path="/admin-dashboard" element={<AdminDashboard />} />
+          
+          {/* Pharmacist Dashboard Route */}
+          <Route path="/pharmacist-dashboard" element={<PharmacistDashboard />} />
+          
+          {/* Lab Technician Dashboard Route */}
+          <Route path="/lab-dashboard" element={<LabDashboard />} />
+          
+          {/* Catch all - redirect to home */}
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </div>
+    </Router>
   );
 }
 

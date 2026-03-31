@@ -24,16 +24,18 @@ const auditLogSchema = new mongoose.Schema({
       'ADD_DOCTOR', 'UPDATE_DOCTOR', 'DEACTIVATE_DOCTOR', 'ACTIVATE_DOCTOR',
       'VIEW_DOCTOR_DETAILS', 'VIEW_DOCTORS',
       
-      // Doctor Request Management (NEW)
+      // Doctor Request Management
       'VIEW_DOCTOR_REQUESTS', 'VIEW_DOCTOR_REQUEST_DETAILS', 
       'APPROVE_DOCTOR_REQUEST', 'REJECT_DOCTOR_REQUEST',
       
       // Patient Management
       'ADD_PATIENT', 'UPDATE_PATIENT', 'DEACTIVATE_PATIENT', 'ACTIVATE_PATIENT',
       'VIEW_PATIENT_DETAILS', 'VIEW_PATIENTS',
+      'PATIENT_PROFILE', 'MEDICAL_HISTORY',
       
-      // Visit Management
+      // Visit & Medication (used by patient routes)
       'CREATE_VISIT', 'UPDATE_VISIT', 'DELETE_VISIT', 'VIEW_VISIT', 'VIEW',
+      'VISIT', 'MEDICATION',
       
       // Statistics
       'VIEW_STATISTICS', 'EXPORT_REPORT',
@@ -43,6 +45,9 @@ const auditLogSchema = new mongoose.Schema({
       
       // AI
       'AI_SYMPTOM_ANALYSIS',
+      
+      // Pharmacy & Lab
+      'DISPENSE', 'DISPENSE_OTC', 'LAB_TEST', 'LAB_RESULT',
       
       // Generic
       'CREATE', 'UPDATE', 'DELETE', 'OTHER'
@@ -61,13 +66,19 @@ const auditLogSchema = new mongoose.Schema({
     type: String,
     enum: [
       'Doctor',
-      'DoctorRequest',  // ✅ FIXED: Was missing, actions were here instead
+      'DoctorRequest',
       'Patient', 
       'Visit', 
       'Account', 
       'Admin',
       'AuditLog',
       'Statistics',
+      'Medication',
+      'Prescription',
+      'LabTest',
+      'Pharmacy',
+      'Laboratory',
+      'Appointment',
       'System', 
       'Other'
     ],

@@ -50,7 +50,7 @@ const accountSchema = new mongoose.Schema({
       message: 'يجب أن يكون هناك دور واحد على الأقل و 4 أدوار كحد أقصى'
     },
     enum: {
-      values: ['patient', 'doctor', 'admin', 'pharmacist', 'laboratory'],
+      values: ['patient', 'doctor', 'admin', 'pharmacist', 'lab_technician', 'dentist', 'nurse', 'receptionist'],
       message: 'الدور غير صالح'
     },
     default: ['patient']
