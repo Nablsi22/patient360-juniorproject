@@ -1,149 +1,194 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+/**
+ * ═══════════════════════════════════════════════════════════════════
+ *  Patient 360° — Navbar Component
+ * ═══════════════════════════════════════════════════════════════════
+ */
+
+import React, { useState, useEffect, useRef, useCallback, useMemo } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import {
+  LogIn,
+  LogOut,
+  ChevronDown,
+  Sun,
+  Moon,
+  Stethoscope,
+  User,
+  Pill,
+  FlaskConical,
+  ShieldCheck,
+  Smile,
+  Info,
+  Eye,
+  Mail,
+  LayoutGrid,
+  UserPlus,
+} from 'lucide-react';
+
 import { useTheme } from '../../context/ThemeProvider';
 import '../../styles/Navbar.css';
+
+/* ─── Constants ─── */
+
+const DASHBOARD_ROUTES = Object.freeze({
+  patient: '/patient-dashboard',
+  doctor: '/doctor-dashboard',
+  admin: '/admin-dashboard',
+  pharmacist: '/pharmacist-dashboard',
+  lab_technician: '/lab-dashboard',
+  dentist: '/dentist-dashboard',
+});
+
+const ROLE_PREFIX = Object.freeze({
+  patient: '',
+  doctor: 'د.',
+  admin: '',
+  pharmacist: 'صيدلي',
+  lab_technician: '',
+  dentist: 'د.',
+});
+
+/* ─── Helpers ─── */
+
+const RoleAvatarIcon = ({ role, size = 18 }) => {
+  const iconProps = { size, strokeWidth: 2.2, 'aria-hidden': true };
+  switch (role) {
+    case 'doctor':         return <Stethoscope {...iconProps} />;
+    case 'patient':        return <User {...iconProps} />;
+    case 'pharmacist':     return <Pill {...iconProps} />;
+    case 'lab_technician': return <FlaskConical {...iconProps} />;
+    case 'admin':          return <ShieldCheck {...iconProps} />;
+    case 'dentist':        return <Smile {...iconProps} />;
+    default:               return <User {...iconProps} />;
+  }
+};
+
+const ThemeToggleButton = ({ isDark, onToggle }) => (
+  <button
+    type="button"
+    className={`p360-theme-btn ${isDark ? 'p360-theme-btn--dark' : ''}`}
+    onClick={onToggle}
+    aria-label={isDark ? 'تبديل إلى الوضع الفاتح' : 'تبديل إلى الوضع الداكن'}
+    aria-pressed={isDark}
+    title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
+  >
+    <span className="p360-theme-btn__icons">
+      {isDark ? (
+        <Sun size={18} strokeWidth={2.2} className="p360-theme-btn__sun" aria-hidden />
+      ) : (
+        <Moon size={18} strokeWidth={2.2} className="p360-theme-btn__moon" aria-hidden />
+      )}
+    </span>
+  </button>
+);
+
+/* ═══ NAVBAR ═══ */
 
 const Navbar = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const { theme, toggleTheme } = useTheme();
+
   const [activeDropdown, setActiveDropdown] = useState(null);
   const [isScrolled, setIsScrolled] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
-  const dropdownRefs = useRef({});
+
   const navbarRef = useRef(null);
 
-  // ── Scroll Detection ──────────────────────────────────────────────
+  const isDark = theme === 'dark';
+  const isDashboardPage = location.pathname.includes('-dashboard');
+
+  /* Scroll detection */
   useEffect(() => {
     let ticking = false;
     const handleScroll = () => {
-      if (!ticking) {
-        window.requestAnimationFrame(() => {
-          setIsScrolled(window.scrollY > 50);
-          ticking = false;
-        });
-        ticking = true;
-      }
+      if (ticking) return;
+      window.requestAnimationFrame(() => {
+        setIsScrolled(window.scrollY > 50);
+        ticking = false;
+      });
+      ticking = true;
     };
-
     window.addEventListener('scroll', handleScroll, { passive: true });
     return () => window.removeEventListener('scroll', handleScroll);
   }, []);
 
-  // ── Auth State Listener ───────────────────────────────────────────
+  /* User sync */
   useEffect(() => {
-    const user = localStorage.getItem('currentUser');
-    setCurrentUser(user ? JSON.parse(user) : null);
+    try {
+      const stored = localStorage.getItem('currentUser');
+      if (!stored) {
+        setCurrentUser(null);
+        return;
+      }
+      const parsed = JSON.parse(stored);
+      const role = parsed.role || (Array.isArray(parsed.roles) && parsed.roles[0]);
+      setCurrentUser(role ? { ...parsed, role } : null);
+    } catch (err) {
+      console.error('[Navbar] Failed to parse currentUser:', err);
+      setCurrentUser(null);
+    }
   }, [location.pathname]);
 
-  // ── Click Outside Handler ─────────────────────────────────────────
+  /* Click outside */
   useEffect(() => {
+    if (!activeDropdown) return;
     const handleClickOutside = (event) => {
-      if (activeDropdown && navbarRef.current && !navbarRef.current.contains(event.target)) {
+      if (navbarRef.current && !navbarRef.current.contains(event.target)) {
         setActiveDropdown(null);
       }
     };
-
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [activeDropdown]);
 
-  // ── Keyboard Accessibility ────────────────────────────────────────
+  /* ESC key */
   useEffect(() => {
+    if (!activeDropdown) return;
     const handleKeyDown = (event) => {
-      if (event.key === 'Escape' && activeDropdown) {
-        setActiveDropdown(null);
-      }
+      if (event.key === 'Escape') setActiveDropdown(null);
     };
-
     document.addEventListener('keydown', handleKeyDown);
     return () => document.removeEventListener('keydown', handleKeyDown);
   }, [activeDropdown]);
 
-  // ── Navigation Helpers ────────────────────────────────────────────
-  const toggleDropdown = useCallback((dropdown) => {
-    setActiveDropdown((prev) => (prev === dropdown ? null : dropdown));
-  }, []);
+  const closeDropdowns = useCallback(() => setActiveDropdown(null), []);
 
-  const closeDropdowns = useCallback(() => {
-    setActiveDropdown(null);
+  const toggleDropdown = useCallback((dropdownId) => {
+    setActiveDropdown((prev) => (prev === dropdownId ? null : dropdownId));
   }, []);
 
   const scrollToSection = useCallback(
     (sectionId) => {
       const isHomePage = location.pathname === '/' || location.pathname === '/login';
-
-      if (isHomePage) {
+      const performScroll = () => {
         const element = document.getElementById(sectionId);
-        if (element) {
-          element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-        }
+        if (element) element.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      };
+      if (isHomePage) {
+        performScroll();
       } else {
         navigate('/');
-        setTimeout(() => {
-          const element = document.getElementById(sectionId);
-          if (element) {
-            element.scrollIntoView({ behavior: 'smooth', block: 'start' });
-          }
-        }, 150);
+        setTimeout(performScroll, 150);
       }
       closeDropdowns();
     },
     [location.pathname, navigate, closeDropdowns]
   );
 
-  // ── Route Mapping ─────────────────────────────────────────────────
-  const DASHBOARD_ROUTES = {
-    doctor: '/doctor/dashboard',
-    patient: '/patient/dashboard',
-    pharmacist: '/pharmacist/dashboard',
-    laboratory: '/laboratory/dashboard',
-  };
-
-  const ROLE_LABELS = {
-    doctor: 'د.',
-    patient: '',
-    pharmacist: '',
-    laboratory: '',
-  };
-
-  const ROLE_ICONS = {
-    doctor: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
-      </svg>
-    ),
-    patient: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2" />
-        <circle cx="12" cy="7" r="4" />
-      </svg>
-    ),
-    pharmacist: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <rect x="3" y="3" width="18" height="18" rx="2" />
-        <path d="M12 8v8M8 12h8" />
-      </svg>
-    ),
-    laboratory: (
-      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M9 3h6v6l5 8H4l5-8V3z" />
-      </svg>
-    ),
-  };
-
-  // ── Event Handlers ────────────────────────────────────────────────
-  const handleLogoClick = () => {
+  const handleLogoClick = useCallback(() => {
     if (currentUser) {
       navigate(DASHBOARD_ROUTES[currentUser.role] || '/');
-    } else if (location.pathname === '/' || location.pathname === '/login') {
+      return;
+    }
+    if (location.pathname === '/' || location.pathname === '/login') {
       scrollToSection('hero');
     } else {
       navigate('/');
     }
-  };
+  }, [currentUser, location.pathname, navigate, scrollToSection]);
 
-  const handleLoginButtonClick = () => {
+  const handleLoginClick = useCallback(() => {
     if (location.pathname === '/signup') {
       navigate('/');
     } else if (location.pathname === '/' || location.pathname === '/login') {
@@ -151,137 +196,79 @@ const Navbar = () => {
     } else {
       navigate('/');
     }
-  };
+  }, [location.pathname, navigate, scrollToSection]);
 
-  const handleSignupClick = (e) => {
-    e.preventDefault();
-    navigate('/signup');
-    closeDropdowns();
-  };
+  const handleSignupClick = useCallback(
+    (e) => {
+      if (e?.preventDefault) e.preventDefault();
+      navigate('/signup');
+      closeDropdowns();
+    },
+    [navigate, closeDropdowns]
+  );
 
-  const handleLogout = () => {
+  const handleLogout = useCallback(() => {
     localStorage.removeItem('currentUser');
+    localStorage.removeItem('token');
     setCurrentUser(null);
     navigate('/');
     closeDropdowns();
-  };
+  }, [navigate, closeDropdowns]);
 
-  // ── Derived State ─────────────────────────────────────────────────
-  const isDashboardPage = location.pathname.includes('/dashboard');
-  const rolePrefix = currentUser ? ROLE_LABELS[currentUser.role] || '' : '';
-  const isDark = theme === 'dark';
+  const aboutMenuItems = useMemo(
+    () => [
+      { id: 'about', label: 'عن Patient 360°', Icon: Info },
+      { id: 'vision', label: 'رؤيتنا ورسالتنا', Icon: Eye },
+      { id: 'contact', label: 'اتصل بنا', Icon: Mail },
+    ],
+    []
+  );
 
-  // ── Dropdown Data ─────────────────────────────────────────────────
-  const aboutMenuItems = [
-    { id: 'about', label: 'عن Patient 360°', icon: 'info' },
-    { id: 'vision', label: 'رؤيتنا ورسالتنا', icon: 'eye' },
-    { id: 'contact', label: 'اتصل بنا', icon: 'mail' },
-  ];
+  const servicesMenuItems = useMemo(
+    () => [
+      { id: 'services', label: 'خدماتنا', Icon: LayoutGrid },
+      { id: 'signup', label: 'إنشاء حساب جديد', Icon: UserPlus, action: handleSignupClick },
+    ],
+    [handleSignupClick]
+  );
 
-  const servicesMenuItems = [
-    { id: 'services', label: 'خدماتنا', icon: 'grid' },
-    { id: 'signup', label: 'إنشاء حساب جديد', icon: 'user-plus', action: handleSignupClick },
-  ];
-
-  // ── Dropdown Icon Component ───────────────────────────────────────
-  const DropdownIcon = ({ type }) => {
-    const icons = {
-      info: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <circle cx="12" cy="12" r="10" />
-          <path d="M12 16v-4M12 8h.01" />
-        </svg>
-      ),
-      eye: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z" />
-          <circle cx="12" cy="12" r="3" />
-        </svg>
-      ),
-      mail: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="2" y="4" width="20" height="16" rx="2" />
-          <path d="M22 7l-10 6L2 7" />
-        </svg>
-      ),
-      grid: (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <rect x="3" y="3" width="7" height="7" />
-          <rect x="14" y="3" width="7" height="7" />
-          <rect x="14" y="14" width="7" height="7" />
-          <rect x="3" y="14" width="7" height="7" />
-        </svg>
-      ),
-      'user-plus': (
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-          <path d="M16 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-          <circle cx="8.5" cy="7" r="4" />
-          <line x1="20" y1="8" x2="20" y2="14" />
-          <line x1="23" y1="11" x2="17" y2="11" />
-        </svg>
-      ),
-    };
-
-    return icons[type] || null;
-  };
-
-  // ── Dropdown Render Helper ────────────────────────────────────────
-  const renderDropdownMenu = (items, dropdownKey) => {
+const renderDropdownMenu = (items, dropdownKey, ariaLabel) => {
     if (activeDropdown !== dropdownKey) return null;
-
     return (
-      <div
-        className="p360-dropdown-menu"
-        role="menu"
-        aria-label={dropdownKey === 'about' ? 'حول المنصة' : 'الخدمات'}
-        ref={(el) => (dropdownRefs.current[dropdownKey] = el)}
-      >
+      <div className="p360-dropdown-menu" role="menu" aria-label={ariaLabel}>
         <div className="p360-dropdown-inner">
-          {items.map((item, index) => (
-            <a
-              key={item.id}
-              href={`#${item.id}`}
-              className="p360-dropdown-item"
-              role="menuitem"
-              style={{ animationDelay: `${index * 0.04}s` }}
-              onClick={(e) => {
-                e.preventDefault();
-                if (item.action) {
-                  item.action(e);
-                } else {
-                  scrollToSection(item.id);
-                }
-              }}
-            >
-              <span className="p360-dropdown-item-icon">
-                <DropdownIcon type={item.icon} />
-              </span>
-              <span className="p360-dropdown-item-label">{item.label}</span>
-            </a>
-          ))}
+          {items.map((item, index) => {
+            const Icon = item.Icon;
+            return (
+              <button
+                type="button"
+                key={item.id}
+                className="p360-dropdown-item"
+                role="menuitem"
+                style={{ animationDelay: `${index * 0.04}s` }}
+                onClick={(e) => {
+                  e.preventDefault();
+                  if (item.action) {
+                    item.action(e);
+                  } else {
+                    scrollToSection(item.id);
+                  }
+                }}
+              >
+                <span className="p360-dropdown-item-icon" aria-hidden="true">
+                  <Icon size={16} strokeWidth={2.2} />
+                </span>
+                <span className="p360-dropdown-item-label">{item.label}</span>
+              </button>
+            );
+          })}
         </div>
       </div>
     );
   };
 
-  // ── Chevron Arrow SVG ─────────────────────────────────────────────
-  const ChevronDown = ({ isOpen }) => (
-    <svg
-      className={`p360-chevron ${isOpen ? 'p360-chevron--open' : ''}`}
-      width="14"
-      height="14"
-      viewBox="0 0 24 24"
-      fill="none"
-      stroke="currentColor"
-      strokeWidth="2.5"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    >
-      <polyline points="6 9 12 15 18 9" />
-    </svg>
-  );
+  const rolePrefix = currentUser ? ROLE_PREFIX[currentUser.role] || '' : '';
 
-  // ── Main Render ───────────────────────────────────────────────────
   return (
     <>
       {activeDropdown && (
@@ -295,16 +282,16 @@ const Navbar = () => {
         aria-label="التنقل الرئيسي"
       >
         <div className="p360-navbar-container">
-          {/* ── Logo Section ── */}
+          {/* LOGO */}
           <div className="p360-navbar-brand">
             <button
+              type="button"
               className="p360-logo-btn"
               onClick={handleLogoClick}
-              aria-label="الصفحة الرئيسية"
+              aria-label="الصفحة الرئيسية — Patient 360"
             >
               <div className="p360-logo-icon">
                 <svg viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  {/* Shield Shape */}
                   <path
                     d="M18 2L4 8v10c0 9 6 16 14 18 8-2 14-9 14-18V8L18 2z"
                     fill="url(#shieldGrad)"
@@ -312,10 +299,8 @@ const Navbar = () => {
                     stroke="url(#shieldStroke)"
                     strokeWidth="1.5"
                   />
-                  {/* Medical Cross */}
                   <rect x="15" y="10" width="6" height="16" rx="1.5" fill="url(#crossGrad)" />
                   <rect x="10" y="15" width="16" height="6" rx="1.5" fill="url(#crossGrad)" />
-                  {/* Pulse Line */}
                   <path
                     className="p360-pulse-path"
                     d="M6 18h4l2-4 3 8 2-6 2 4h4l2-3 2 3h3"
@@ -356,41 +341,15 @@ const Navbar = () => {
             </button>
           </div>
 
-          {/* ── Navigation Section ── */}
+          {/* NAV */}
           <div className="p360-navbar-nav">
             {currentUser ? (
               <div className="p360-auth-section">
-                {/* ── Theme Toggle ── */}
-                <button
-                  className={`p360-theme-btn ${isDark ? 'p360-theme-btn--dark' : ''}`}
-                  onClick={toggleTheme}
-                  aria-label={isDark ? 'تبديل إلى الوضع الفاتح' : 'تبديل إلى الوضع الداكن'}
-                  title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
-                  type="button"
-                >
-                  <span className={`p360-theme-btn__icons ${isDark ? 'p360-theme-btn__icons--dark' : ''}`}>
-                    {/* Moon */}
-                    <svg className="p360-theme-btn__moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                    </svg>
-                    {/* Sun */}
-                    <svg className="p360-theme-btn__sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="5" />
-                      <line x1="12" y1="1" x2="12" y2="3" />
-                      <line x1="12" y1="21" x2="12" y2="23" />
-                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                      <line x1="1" y1="12" x2="3" y2="12" />
-                      <line x1="21" y1="12" x2="23" y2="12" />
-                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                    </svg>
-                  </span>
-                </button>
+                <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} />
 
-                <div className="p360-user-badge">
+                <div className="p360-user-badge" aria-label={`المستخدم الحالي: ${currentUser.firstName}`}>
                   <div className="p360-user-avatar">
-                    {ROLE_ICONS[currentUser.role]}
+                    <RoleAvatarIcon role={currentUser.role} size={18} />
                   </div>
                   <div className="p360-user-details">
                     <span className="p360-user-greeting">مرحباً</span>
@@ -399,85 +358,69 @@ const Navbar = () => {
                     </span>
                   </div>
                 </div>
-                <button className="p360-btn p360-btn--logout" onClick={handleLogout}>
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4" />
-                    <polyline points="16 17 21 12 16 7" />
-                    <line x1="21" y1="12" x2="9" y2="12" />
-                  </svg>
+
+                <button
+                  type="button"
+                  className="p360-btn p360-btn--logout"
+                  onClick={handleLogout}
+                  aria-label="تسجيل الخروج"
+                >
+                  <LogOut size={16} strokeWidth={2.2} aria-hidden />
                   <span>تسجيل الخروج</span>
                 </button>
               </div>
             ) : (
               <div className="p360-guest-section">
-                {/* ── Theme Toggle ── */}
-                <button
-                  className={`p360-theme-btn ${isDark ? 'p360-theme-btn--dark' : ''}`}
-                  onClick={toggleTheme}
-                  aria-label={isDark ? 'تبديل إلى الوضع الفاتح' : 'تبديل إلى الوضع الداكن'}
-                  title={isDark ? 'الوضع الفاتح' : 'الوضع الداكن'}
-                  type="button"
-                >
-                  <span className={`p360-theme-btn__icons ${isDark ? 'p360-theme-btn__icons--dark' : ''}`}>
-                    {/* Moon */}
-                    <svg className="p360-theme-btn__moon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M21 12.79A9 9 0 1111.21 3 7 7 0 0021 12.79z" />
-                    </svg>
-                    {/* Sun */}
-                    <svg className="p360-theme-btn__sun" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <circle cx="12" cy="12" r="5" />
-                      <line x1="12" y1="1" x2="12" y2="3" />
-                      <line x1="12" y1="21" x2="12" y2="23" />
-                      <line x1="4.22" y1="4.22" x2="5.64" y2="5.64" />
-                      <line x1="18.36" y1="18.36" x2="19.78" y2="19.78" />
-                      <line x1="1" y1="12" x2="3" y2="12" />
-                      <line x1="21" y1="12" x2="23" y2="12" />
-                      <line x1="4.22" y1="19.78" x2="5.64" y2="18.36" />
-                      <line x1="18.36" y1="5.64" x2="19.78" y2="4.22" />
-                    </svg>
-                  </span>
-                </button>
+                <ThemeToggleButton isDark={isDark} onToggle={toggleTheme} />
 
                 <button
+                  type="button"
                   className="p360-btn p360-btn--login"
-                  onClick={handleLoginButtonClick}
+                  onClick={handleLoginClick}
+                  aria-label="تسجيل الدخول"
                 >
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4" />
-                    <polyline points="10 17 15 12 10 7" />
-                    <line x1="15" y1="12" x2="3" y2="12" />
-                  </svg>
+                  <LogIn size={16} strokeWidth={2.2} aria-hidden />
                   <span>تسجيل الدخول</span>
                 </button>
 
                 {!isDashboardPage && (
                   <>
-                    {/* About Dropdown */}
                     <div className="p360-nav-item">
                       <button
+                        type="button"
                         className={`p360-btn p360-btn--nav ${activeDropdown === 'about' ? 'p360-btn--active' : ''}`}
                         onClick={() => toggleDropdown('about')}
                         aria-expanded={activeDropdown === 'about'}
-                        aria-haspopup="true"
+                        aria-haspopup="menu"
                       >
                         <span>حول المنصة</span>
-                        <ChevronDown isOpen={activeDropdown === 'about'} />
+                        <ChevronDown
+                          size={14}
+                          strokeWidth={2.5}
+                          className={`p360-chevron ${activeDropdown === 'about' ? 'p360-chevron--open' : ''}`}
+                          aria-hidden
+                        />
                       </button>
-                      {renderDropdownMenu(aboutMenuItems, 'about')}
+                      {renderDropdownMenu(aboutMenuItems, 'about', 'حول المنصة')}
                     </div>
 
-                    {/* Services Dropdown */}
                     <div className="p360-nav-item">
                       <button
+                        type="button"
                         className={`p360-btn p360-btn--nav ${activeDropdown === 'services' ? 'p360-btn--active' : ''}`}
                         onClick={() => toggleDropdown('services')}
                         aria-expanded={activeDropdown === 'services'}
-                        aria-haspopup="true"
+                        aria-haspopup="menu"
                       >
                         <span>الخدمات</span>
-                        <ChevronDown isOpen={activeDropdown === 'services'} />
+                        <ChevronDown
+                          size={14}
+                          strokeWidth={2.5}
+                          className={`p360-chevron ${activeDropdown === 'services' ? 'p360-chevron--open' : ''}`}
+                          aria-hidden
+                        />
                       </button>
-                      {renderDropdownMenu(servicesMenuItems, 'services')}
+                      {renderDropdownMenu(servicesMenuItems, 'services', 'الخدمات')}
                     </div>
                   </>
                 )}
@@ -486,8 +429,7 @@ const Navbar = () => {
           </div>
         </div>
 
-        {/* ── Bottom Accent Line ── */}
-        <div className="p360-navbar-accent" />
+        <div className="p360-navbar-accent" aria-hidden="true" />
       </nav>
     </>
   );
