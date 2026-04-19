@@ -205,6 +205,187 @@ export const authAPI = {
       const errorMessage = error.response?.data?.message || error.message || 'لم يتم العثور على طلب بهذا البريد الإلكتروني';
       throw { message: errorMessage, ...error.response?.data };
     }
+  },
+
+  // ==========================================
+  // ✅ PHARMACIST REGISTRATION FUNCTIONS  (v2 — added in SignUp v2)
+  // ==========================================
+
+  /**
+   * Submit a pharmacist registration request with file uploads.
+   *
+   * Sent as multipart/form-data because it includes files (license document,
+   * degree certificate, optional profile photo). Persists on the backend into
+   * doctor_requests with requestType='pharmacist' (no DB schema change needed —
+   * doctor_requests has additionalProperties: true).
+   *
+   * Expected FormData fields (built in SignUp.jsx handlePharmacistSubmit):
+   *   Personal: firstName, fatherName, lastName, motherName, nationalId,
+   *             dateOfBirth, gender, phoneNumber, email, password,
+   *             address, governorate, city
+   *   Professional: pharmacyLicenseNumber, degree, specialization,
+   *                 yearsOfExperience, employmentType
+   *   Facility (exactly one of):
+   *             pharmacyId          — ObjectId of an existing pharmacies doc
+   *             newPharmacyData     — JSON string: { name, license, governorate, city, address }
+   *   Optional: additionalNotes
+   *   Files   : licenseDocument, degreeDocument, profilePhoto (optional)
+   *
+   * @param {FormData} formData
+   * @returns {Promise<{success, requestId, message}>}
+   */
+  registerPharmacist: async (formData) => {
+    try {
+      const response = await api.post('/auth/register-pharmacist', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 30000 // 30 seconds — file uploads need more time
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تقديم طلب تسجيل الصيدلي';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ==========================================
+  // ✅ LAB TECHNICIAN REGISTRATION FUNCTIONS  (v2 — added in SignUp v2)
+  // ==========================================
+
+  /**
+   * Submit a lab technician registration request with file uploads.
+   *
+   * Same multipart/form-data pattern as registerPharmacist. Persists into
+   * doctor_requests with requestType='lab_technician'.
+   *
+   * Expected FormData fields:
+   *   Personal: firstName, fatherName, lastName, motherName, nationalId,
+   *             dateOfBirth, gender, phoneNumber, email, password,
+   *             address, governorate, city
+   *   Professional: licenseNumber, degree, specialization, position,
+   *                 yearsOfExperience
+   *   Facility (exactly one of):
+   *             laboratoryId        — ObjectId of an existing laboratories doc
+   *             newLaboratoryData   — JSON string: { name, license, governorate, city, address }
+   *   Optional: additionalNotes
+   *   Files   : licenseDocument, degreeDocument, profilePhoto (optional)
+   *
+   * @param {FormData} formData
+   * @returns {Promise<{success, requestId, message}>}
+   */
+  registerLabTechnician: async (formData) => {
+    try {
+      const response = await api.post('/auth/register-lab-technician', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data'
+        },
+        timeout: 30000 // 30 seconds — file uploads need more time
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تقديم طلب تسجيل فني المختبر';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ==========================================
+  // ✅ FACILITY AUTOCOMPLETE FUNCTIONS  (v2 — added in SignUp v2)
+  // Powers the FacilityAutocomplete component in the pharmacist and
+  // lab-tech signup forms. Public endpoints (no JWT required) because
+  // they fire before the user has an account.
+  // ==========================================
+
+  /**
+   * Search pharmacies by name for the facility picker autocomplete.
+   * Backend should match against pharmacies.name, pharmacies.arabicName,
+   * and pharmacies.registrationNumber, filter by isActive=true, and return
+   * at most 10 results sorted by relevance.
+   *
+   * @param {string} query - search string, min 2 chars enforced client-side
+   * @returns {Promise<Array<{
+   *   _id: string,
+   *   name: string,
+   *   arabicName?: string,
+   *   governorate: string,
+   *   city: string,
+   *   address?: string,
+   *   pharmacyLicense?: string
+   * }>>}
+   */
+  searchPharmacies: async (query) => {
+    try {
+      const response = await api.get('/pharmacies/search', {
+        params: { q: query }
+      });
+      // Normalize: some endpoints wrap in { data: [...] }, some return the array directly
+      return Array.isArray(response.data) ? response.data : (response.data?.data || []);
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في البحث عن الصيدليات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * Search laboratories by name for the facility picker autocomplete.
+   * Mirror of searchPharmacies — same shape, same semantics.
+   *
+   * @param {string} query - search string, min 2 chars enforced client-side
+   * @returns {Promise<Array<{
+   *   _id: string,
+   *   name: string,
+   *   arabicName?: string,
+   *   governorate: string,
+   *   city: string,
+   *   address?: string
+   * }>>}
+   */
+  searchLaboratories: async (query) => {
+    try {
+      const response = await api.get('/laboratories/search', {
+        params: { q: query }
+      });
+      return Array.isArray(response.data) ? response.data : (response.data?.data || []);
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في البحث عن المختبرات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ==========================================
+  // ✅ UNIFIED PROFESSIONAL STATUS CHECK  (v2 — added in SignUp v2)
+  // ==========================================
+
+  /**
+   * Check the status of a previously submitted professional registration
+   * request (doctor, pharmacist, or lab technician). Looks up the request
+   * by the email used during registration.
+   *
+   * This is the v2 replacement for checkDoctorStatus. It returns an additional
+   * `requestType` field so the UI can render the correct copy (طبيب / صيدلي /
+   * فني مختبر). The old checkDoctorStatus method above is preserved as an
+   * alias for backward compatibility.
+   *
+   * @param {string} email - Email used during professional registration
+   * @returns {Promise<{
+   *   success: boolean,
+   *   status: 'pending' | 'approved' | 'rejected',
+   *   requestType: 'doctor' | 'pharmacist' | 'lab_technician',
+   *   credentials?: { email: string, password: string, name: string },
+   *   submittedAt?: string,
+   *   reviewedAt?: string,
+   *   rejectionReason?: string,
+   *   message?: string
+   * }>}
+   */
+  checkProfessionalStatus: async (email) => {
+    try {
+      const response = await api.post('/auth/check-professional-status', { email });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'لم يتم العثور على طلب بهذا البريد الإلكتروني';
+      throw { message: errorMessage, ...error.response?.data };
+    }
   }
 };
 
