@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [Design system — Teal Medica, Arabic RTL, Cairo font](#design-system--teal-medica-arabic-rtl-cairo-font)
 - [Critical code patterns (from real bugs)](#critical-code-patterns-from-real-bugs)
 - [Current pending work](#current-pending-work)
+  - [Dashboard audit findings (as of 2026-04-19)](#dashboard-audit-findings-as-of-2026-04-19)
 - [Git workflow](#git-workflow)
 - [Environment](#environment)
 - [Team](#team)
@@ -97,10 +98,12 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
 
 ## Current pending work
 
-1. AdminDashboard.jsx response shape mismatch — backend returns
-   { requests: [...] }, frontend reads a different shape. Also
-   possible: might be calling a legacy localStorage service instead
-   of real API. Diagnose carefully.
+1. AdminDashboard.jsx: shape mismatch is RESOLVED (verified
+   2026-04-19 audit — `data.requests` matches backend
+   `{ success, count, requests }`). The real bug is different:
+   routes exist for several admin tabs but the backend controller
+   methods are missing, so those tabs 404 silently. See
+   "Dashboard audit findings" below.
 
 2. Audit all other dashboards (DoctorDashboard, PatientDashboard,
    PharmacistDashboard, LabDashboard) for same pattern. Check
@@ -131,6 +134,30 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
 7. Resolve bcrypt + bcryptjs double-dependency in backend
    package.json. Standardize on bcryptjs (already used by models)
    and remove bcrypt.
+
+### Dashboard audit findings (as of 2026-04-19)
+
+1. **PatientDashboard.jsx bypasses `services/api.js`** — 10
+   hardcoded `http://localhost:5000` URLs at lines 122, 772, 808,
+   840, 863, 886, 918, 939, 966, 991. Highest priority: migrate to
+   `patientAPI` calls so `REACT_APP_API_URL` is respected.
+
+2. **AdminDashboard.jsx has missing controllers, not a shape
+   mismatch** — routes exist for children, hospitals, pharmacies,
+   laboratories, emergency reports, and reviews, but the backend
+   controller methods are not implemented. Those tabs 404 silently.
+
+3. **DoctorDashboard.jsx mixes real `doctorAPI` with legacy
+   `authService.js`** (only for `logout`). Migrate logout to
+   `authAPI`. Some response shapes are unverified — needs a
+   follow-up controller trace.
+
+4. **PharmacistDashboard.jsx and LabDashboard.jsx are CLEAN
+   reference implementations.** Use their patterns when migrating
+   the others:
+   - Defensive `res?.success` checks before destructuring
+   - Errors routed through `openAlert()` wrapper, not `console.*`
+   - No direct `localStorage` data bypass
 
 ## Git workflow
 
