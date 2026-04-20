@@ -10,6 +10,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [Critical code patterns (from real bugs)](#critical-code-patterns-from-real-bugs)
 - [Current pending work](#current-pending-work)
   - [Dashboard audit findings (as of 2026-04-19)](#dashboard-audit-findings-as-of-2026-04-19)
+    - [Patient backend integrity (URGENT - 2026-04-19 audit)](#patient-backend-integrity-urgent---2026-04-19-audit)
 - [Git workflow](#git-workflow)
 - [Environment](#environment)
 - [Team](#team)
@@ -158,6 +159,36 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
    - Defensive `res?.success` checks before destructuring
    - Errors routed through `openAlert()` wrapper, not `console.*`
    - No direct `localStorage` data bypass
+
+#### Patient backend integrity (URGENT - 2026-04-19 audit)
+
+- All 9 /api/patient/* endpoints exist as routes — no missing
+  controllers here.
+
+- 5 of 9 endpoints violate the dual-patient rule: #2 GET visits,
+  #4 GET appointments, #5 GET lab-results, #6 GET prescriptions,
+  #9 POST appointments. All query a single patientId field against
+  req.user.personId, assuming adult users only. Child patients
+  return empty from every one. Write endpoints (POST appointment)
+  are creating documents with wrong field names.
+
+- 6 of 9 endpoints are INLINE ANONYMOUS HANDLERS in routes/patient.js,
+  not proper controller functions. They hit raw MongoDB collections
+  (appointments, lab_tests, prescriptions, availability_slots)
+  without Mongoose models. This means the frozen schema in
+  patient360_db_final.js is NOT enforced on writes through these
+  endpoints. Currently-stored data may not pass validation.
+
+- Only visitController.getVisits and medicationController.getCurrentMedications
+  live in proper controllers.
+
+- backend/routes/patient.route.js is confirmed dead code (not
+  imported anywhere). Safe to delete separately.
+
+- DECISION: backend correctness must be fixed BEFORE PatientDashboard
+  frontend migration. Migrating the frontend first would make a
+  broken backend reachable from production without fixing the
+  underlying bugs.
 
 ## Git workflow
 
