@@ -143,6 +143,9 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
 9. Consolidate dashboard sidebars into a shared component
    (currently inlined per-dashboard matching Pharmacist/Lab pattern).
 
+10. Email change flow for patients (confirmation token via old
+    and new email; deferred from updateMyProfile v1).
+
 ### Dashboard audit findings (as of 2026-04-19)
 
 1. **PatientDashboard.jsx bypasses `services/api.js`** — 10
