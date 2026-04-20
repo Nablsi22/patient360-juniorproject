@@ -40,6 +40,8 @@ import {
   Plus, Check, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon, Info,
   Download, ExternalLink, Eye, Clock, RotateCcw, Filter, Search, Trash2,
   MapPinned, Siren,
+  // Theme toggle
+  Sun, Moon,
   // AI input modalities (Image aliased to avoid DOM Image clash)
   Image as ImageIcon, Mic,
 } from 'lucide-react';
@@ -864,6 +866,9 @@ export default function PatientDashboard() {
   // ── Layout state ────────────────────────────────────────────────────
   const [activeSection, setActiveSection] = useState('home');
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [darkMode, setDarkMode] = useState(
+    () => localStorage.getItem('pd-theme') === 'dark'
+  );
 
   // ── Profile + overview (loaded on mount, in parallel) ───────────────
   const [profile, setProfile] = useState(null);
@@ -935,6 +940,15 @@ export default function PatientDashboard() {
     cancelLabel: 'إلغاء',
     size: 'md',
   });
+
+  // ── Theme: apply to <html> and persist to localStorage ──────────────
+  useEffect(() => {
+    document.documentElement.setAttribute(
+      'data-theme',
+      darkMode ? 'dark' : 'light'
+    );
+    localStorage.setItem('pd-theme', darkMode ? 'dark' : 'light');
+  }, [darkMode]);
 
   // ── Initial mount: load profile + overview in parallel ──────────────
   useEffect(() => {
@@ -1375,6 +1389,15 @@ export default function PatientDashboard() {
         </div>
 
         <div className="pd-page-header-right">
+          <button
+            type="button"
+            className="pd-theme-toggle"
+            onClick={() => setDarkMode((prev) => !prev)}
+            aria-label={darkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
+            title={darkMode ? 'الوضع النهاري' : 'الوضع الليلي'}
+          >
+            {darkMode ? <Sun size={20} aria-hidden="true" /> : <Moon size={20} aria-hidden="true" />}
+          </button>
           <button
             type="button"
             className="pd-page-header-bell"
