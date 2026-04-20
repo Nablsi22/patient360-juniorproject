@@ -11,6 +11,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - [Current pending work](#current-pending-work)
   - [Dashboard audit findings (as of 2026-04-19)](#dashboard-audit-findings-as-of-2026-04-19)
     - [Patient backend integrity (URGENT - 2026-04-19 audit)](#patient-backend-integrity-urgent---2026-04-19-audit)
+    - [AI history storage — supersedes earlier ai_analyses plan (2026-04-20)](#ai-history-storage--supersedes-earlier-ai_analyses-plan-2026-04-20)
 - [Git workflow](#git-workflow)
 - [Environment](#environment)
 - [Team](#team)
@@ -136,6 +137,12 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
    package.json. Standardize on bcryptjs (already used by models)
    and remove bcrypt.
 
+8. Voice input for emergency triage AI (deferred from v1 of
+   PatientDashboard redesign — requires HTTPS).
+
+9. Consolidate dashboard sidebars into a shared component
+   (currently inlined per-dashboard matching Pharmacist/Lab pattern).
+
 ### Dashboard audit findings (as of 2026-04-19)
 
 1. **PatientDashboard.jsx bypasses `services/api.js`** — 10
@@ -189,6 +196,10 @@ for Latin/numbers. All pages set direction: rtl. LTR inputs
   frontend migration. Migrating the frontend first would make a
   broken backend reachable from production without fixing the
   underlying bugs.
+
+#### AI history storage — supersedes earlier ai_analyses plan (2026-04-20)
+
+An earlier planning session proposed adding a new `ai_analyses` collection to persist AI model output. After reading `patient360_db_final.js` directly, that plan is SUPERSEDED. The frozen schema already defines `emergency_reports` with exactly the fields the senior redwan emergency-triage AI returns — `inputType` (text/image/voice/combined), `textDescription`, `imageUrl`, `voiceNoteUrl`, `voiceTranscript`, `aiRiskLevel`, `aiFirstAid[]`, `aiConfidence`, `aiRawResponse`, `aiModelVersion`, plus `patientPersonId` / `patientChildId` dual-reference. No new collection is needed; no schema change is required. CLAUDE.md rule #1 (frozen schema) is therefore preserved. Note: the specialist-recommender AI at `/api/patient/ai-symptom-analysis` is a separate service returning `{specialist, disease, organ_system}` and remains intentionally ephemeral — no persistence in v1.
 
 ## Git workflow
 
