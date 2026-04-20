@@ -441,6 +441,728 @@ export const patientAPI = {
     } catch (error) {
       throw error.response?.data || error;
     }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 1 — PROFILE
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/profile */
+  /**
+   * Get the logged-in patient's combined profile.
+   *
+   * Backend resolves identity from JWT (persons._id OR children._id) and
+   * joins with the patients._id document. Returns dualRef so the frontend
+   * can thread patientPersonId / patientChildId into downstream calls.
+   *
+   * @returns {Promise<{
+   *   success: true,
+   *   isMinor: boolean,
+   *   dualRef: { patientPersonId?: string, patientChildId?: string },
+   *   person?: {
+   *     _id: string, nationalId: string, firstName: string, fatherName: string,
+   *     lastName: string, motherName: string, dateOfBirth: string,
+   *     gender: 'male'|'female', maritalStatus?: string, occupation?: string,
+   *     education?: string, phoneNumber: string, alternativePhoneNumber?: string,
+   *     email?: string, governorate: string, city: string, district?: string,
+   *     street?: string, building?: string, address: string,
+   *     profilePhoto?: { url: string, uploadedAt: string }
+   *   },
+   *   child?: {
+   *     _id: string, childRegistrationNumber: string, parentPersonId: string,
+   *     firstName: string, fatherName: string, lastName: string,
+   *     motherName: string, dateOfBirth: string, gender: 'male'|'female',
+   *     phoneNumber?: string, governorate: string, city: string, address: string,
+   *     guardianName?: string, guardianRelationship?: string,
+   *     schoolName?: string, grade?: string,
+   *     profilePhoto?: { url: string, uploadedAt: string }
+   *   },
+   *   patient: {
+   *     _id: string, personId?: string, childId?: string,
+   *     bloodType?: string, rhFactor?: string, height?: number,
+   *     weight?: number, bmi?: number, smokingStatus?: string,
+   *     alcoholConsumption?: string, exerciseFrequency?: string,
+   *     dietType?: string, chronicDiseases: string[], allergies: string[],
+   *     familyHistory: string[], previousSurgeries: object[],
+   *     currentMedications: string[],
+   *     emergencyContact?: { name: string, relationship: string, phoneNumber: string, alternativePhoneNumber?: string },
+   *     medicalCardNumber?: string, totalVisits?: number, lastVisitDate?: string
+   *   }
+   * }>}
+   */
+  getMyProfile: async () => {
+    try {
+      const response = await api.get('/patient/profile');
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الملف الشخصي';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement PATCH /api/patient/profile */
+  /**
+   * Update the logged-in patient's editable profile fields.
+   *
+   * Email changes not supported in v1 — requires backend confirmation flow
+   * (separate feature; see CLAUDE.md Current pending work item 10).
+   *
+   * National ID and names are read-only on the backend (not accepted in this
+   * payload). Backend rejects any attempt to modify them.
+   *
+   * Editable fields (persons/children): phoneNumber, alternativePhoneNumber,
+   *   address, governorate, city, district, street, building, profilePhoto.
+   * Editable fields (patients): bloodType, rhFactor, height, weight,
+   *   smokingStatus, alcoholConsumption, exerciseFrequency, dietType,
+   *   allergies, chronicDiseases, familyHistory, currentMedications,
+   *   emergencyContact.
+   *
+   * @param {object} payload - Partial profile update
+   * @returns {Promise<{ success: true, person?: object, child?: object, patient: object }>}
+   */
+  updateMyProfile: async (payload) => {
+    try {
+      const response = await api.patch('/patient/profile', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحديث الملف الشخصي';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 2 — DASHBOARD OVERVIEW
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/overview */
+  /**
+   * Get aggregate counts + recent activity for the home section KPI tiles.
+   *
+   * Backend computes by querying appointments, prescriptions, lab_tests,
+   * notifications scoped to the current patientPersonId/patientChildId.
+   * No single backing collection — aggregation only.
+   *
+   * @returns {Promise<{
+   *   success: true,
+   *   upcomingAppointments: number,
+   *   activePrescriptions: number,
+   *   pendingLabResults: number,
+   *   unreadNotifications: number,
+   *   recentActivity: Array<{
+   *     _id: string,
+   *     type: 'appointment'|'visit'|'prescription'|'lab_test'|'notification',
+   *     title: string,
+   *     subtitle?: string,
+   *     occurredAt: string,
+   *     relatedId?: string
+   *   }>
+   * }>}
+   */
+  getDashboardOverview: async () => {
+    try {
+      const response = await api.get('/patient/overview');
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل البيانات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 3 — APPOINTMENTS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/appointments */
+  /**
+   * List the patient's appointments.
+   *
+   * Scoped server-side by patientPersonId OR patientChildId from JWT.
+   *
+   * @param {object} [filters]
+   * @param {string} [filters.status] - scheduled|confirmed|checked_in|in_progress|completed|cancelled|no_show|rescheduled
+   * @param {string} [filters.from] - ISO date lower bound
+   * @param {string} [filters.to] - ISO date upper bound
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   appointments: Array<{
+   *     _id: string, appointmentType: string, patientPersonId?: string,
+   *     patientChildId?: string, doctorId?: string, dentistId?: string,
+   *     laboratoryId?: string, hospitalId?: string, slotId?: string,
+   *     appointmentDate: string, appointmentTime: string,
+   *     estimatedDuration?: number, reasonForVisit: string,
+   *     status: string, bookingMethod?: string,
+   *     cancellationReason?: string, priority?: string,
+   *     paymentStatus?: string, visitId?: string, notes?: string,
+   *     createdAt: string
+   *   }>
+   * }>}
+   */
+  getAppointments: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/appointments', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل المواعيد';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/appointments/:id */
+  /**
+   * Get a single appointment by ID. Backend verifies ownership.
+   *
+   * @param {string} appointmentId
+   * @returns {Promise<{ success: true, appointment: object }>} — see getAppointments shape
+   */
+  getAppointmentById: async (appointmentId) => {
+    try {
+      const response = await api.get(`/patient/appointments/${appointmentId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الموعد';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement PATCH /api/patient/appointments/:id/cancel */
+  /**
+   * Cancel an appointment. cancellationReason is a schema enum.
+   *
+   * @param {string} appointmentId
+   * @param {{ cancellationReason: 'patient_request'|'doctor_unavailable'|'emergency'|'duplicate'|'other' }} payload
+   * @returns {Promise<{ success: true, appointment: object }>}
+   */
+  cancelAppointment: async (appointmentId, payload) => {
+    try {
+      const response = await api.patch(`/patient/appointments/${appointmentId}/cancel`, payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إلغاء الموعد';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement POST /api/patient/appointments */
+  /**
+   * Book a new appointment by selecting an availability slot.
+   *
+   * Payload must include a valid slotId obtained from getDoctorSlots.
+   * Patient identity resolved server-side from JWT (no patientId in payload).
+   *
+   * @param {object} payload
+   * @param {string} payload.slotId - availability_slots._id
+   * @param {'doctor'|'dentist'|'lab_test'|'follow_up'|'emergency'} payload.appointmentType
+   * @param {string} payload.reasonForVisit
+   * @param {'routine'|'urgent'|'emergency'} [payload.priority]
+   * @param {string} [payload.notes]
+   * @returns {Promise<{ success: true, appointment: object }>}
+   */
+  bookAppointment: async (payload) => {
+    try {
+      const response = await api.post('/patient/appointments', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في حجز الموعد';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/doctors */
+  /**
+   * Search doctors available for appointment booking.
+   *
+   * @param {object} [filters]
+   * @param {string} [filters.specialization]
+   * @param {string} [filters.governorate]
+   * @param {string} [filters.city]
+   * @param {boolean} [filters.isAvailable]
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   doctors: Array<{
+   *     _id: string, personId: string, firstName: string, lastName: string,
+   *     specialization: string, subSpecializations?: string[],
+   *     medicalLicenseNumber: string, yearsOfExperience?: number,
+   *     consultationFee?: number, currency?: string,
+   *     governorate?: string, city?: string, hospitalIds?: string[],
+   *     averageRating?: number, reviewCount?: number, profilePhoto?: object
+   *   }>
+   * }>}
+   */
+  searchDoctors: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/doctors', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في البحث عن الأطباء';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/doctors/:id/slots */
+  /**
+   * List a doctor's available appointment slots.
+   *
+   * @param {string} doctorId
+   * @param {string} [date] - ISO date YYYY-MM-DD; defaults server-side to next 7 days
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   slots: Array<{
+   *     _id: string, doctorId: string, slotDate: string,
+   *     startTime: string, endTime: string,
+   *     duration: number, isBooked: boolean, appointmentId?: string
+   *   }>
+   * }>}
+   */
+  getDoctorSlots: async (doctorId, date) => {
+    try {
+      const response = await api.get(`/patient/doctors/${doctorId}/slots`, { params: date ? { date } : {} });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل المواعيد المتاحة';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 4 — VISITS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/visits */
+  /**
+   * List the patient's completed/in-progress visits.
+   *
+   * @param {object} [filters]
+   * @param {string} [filters.from] - ISO date lower bound
+   * @param {string} [filters.to] - ISO date upper bound
+   * @param {'in_progress'|'completed'|'cancelled'} [filters.status]
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   visits: Array<{
+   *     _id: string, visitType: string, patientPersonId?: string,
+   *     patientChildId?: string, doctorId?: string, dentistId?: string,
+   *     hospitalId?: string, appointmentId?: string,
+   *     visitDate: string, status: string,
+   *     chiefComplaint: string, diagnosis?: string,
+   *     vitalSigns?: object, prescribedMedications?: object[],
+   *     doctorNotes?: string, followUpDate?: string, followUpNotes?: string,
+   *     visitPhotoUrl?: string, ecgAnalysis?: object,
+   *     paymentStatus?: string, paymentMethod?: string, createdAt: string
+   *   }>
+   * }>}
+   */
+  getVisits: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/visits', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الزيارات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/visits/:id */
+  /**
+   * Get a single visit by ID with full details including vitalSigns,
+   * prescribedMedications, and ecgAnalysis (if present).
+   *
+   * @param {string} visitId
+   * @returns {Promise<{ success: true, visit: object }>}
+   */
+  getVisitById: async (visitId) => {
+    try {
+      const response = await api.get(`/patient/visits/${visitId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الزيارة';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 5 — PRESCRIPTIONS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/prescriptions */
+  /**
+   * List the patient's prescriptions.
+   *
+   * @param {object} [filters]
+   * @param {'active'|'dispensed'|'partially_dispensed'|'expired'|'cancelled'} [filters.status]
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   prescriptions: Array<{
+   *     _id: string, prescriptionNumber: string, patientPersonId?: string,
+   *     patientChildId?: string, doctorId?: string, visitId?: string,
+   *     prescriptionDate: string, expiryDate: string,
+   *     medications: Array<{
+   *       medicationId?: string, medicationName: string, arabicName?: string,
+   *       dosage: string, frequency: string, duration: string,
+   *       route?: string, instructions?: string, quantity?: number,
+   *       isDispensed: boolean, dispensedAt?: string
+   *     }>,
+   *     status: string, verificationCode?: string, qrCode?: string,
+   *     prescriptionNotes?: string, dispensingId?: string, createdAt: string
+   *   }>
+   * }>}
+   */
+  getPrescriptions: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/prescriptions', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الوصفات الطبية';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/prescriptions/:id */
+  /**
+   * Get a single prescription by ID, including verificationCode + qrCode
+   * used at pharmacy pickup.
+   *
+   * @param {string} prescriptionId
+   * @returns {Promise<{ success: true, prescription: object }>}
+   */
+  getPrescriptionById: async (prescriptionId) => {
+    try {
+      const response = await api.get(`/patient/prescriptions/${prescriptionId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الوصفة الطبية';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 6 — LAB RESULTS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/lab-tests */
+  /**
+   * List the patient's lab tests.
+   *
+   * @param {object} [filters]
+   * @param {'ordered'|'scheduled'|'sample_collected'|'in_progress'|'completed'|'cancelled'|'rejected'} [filters.status]
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   labTests: Array<{
+   *     _id: string, testNumber: string, patientPersonId?: string,
+   *     patientChildId?: string, orderedBy: string, visitId?: string,
+   *     laboratoryId: string, orderDate: string, scheduledDate?: string,
+   *     testsOrdered: object[], testCategory?: string, priority?: string,
+   *     status: string, sampleCollectedAt?: string,
+   *     testResults?: Array<{
+   *       testCode?: string, testName: string, value: string,
+   *       numericValue?: number, unit?: string, referenceRange?: string,
+   *       isAbnormal?: boolean, isCritical?: boolean
+   *     }>,
+   *     resultPdfUrl?: string, completedAt?: string,
+   *     isCritical?: boolean, isViewedByPatient?: boolean,
+   *     patientViewedAt?: string, totalCost?: number, currency?: string,
+   *     createdAt: string
+   *   }>
+   * }>}
+   */
+  getLabTests: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/lab-tests', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل نتائج المختبر';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/lab-tests/:id */
+  /**
+   * Get a single lab test by ID with full testResults array and resultPdfUrl.
+   *
+   * @param {string} labTestId
+   * @returns {Promise<{ success: true, labTest: object }>}
+   */
+  getLabTestById: async (labTestId) => {
+    try {
+      const response = await api.get(`/patient/lab-tests/${labTestId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل نتيجة المختبر';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement PATCH /api/patient/lab-tests/:id/viewed */
+  /**
+   * Mark a lab test as viewed by the patient.
+   *
+   * Backend sets lab_tests.isViewedByPatient = true and
+   * lab_tests.patientViewedAt = now server-side.
+   *
+   * @param {string} labTestId
+   * @returns {Promise<{ success: true }>}
+   */
+  markLabTestViewed: async (labTestId) => {
+    try {
+      const response = await api.patch(`/patient/lab-tests/${labTestId}/viewed`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 7 — NOTIFICATIONS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/notifications */
+  /**
+   * List the patient's notifications from the notifications collection.
+   *
+   * Backend filters by recipientId = current patient accountId and
+   * recipientType = 'patient'.
+   *
+   * @param {object} [filters]
+   * @param {boolean} [filters.unread] - if true, return only notifications with status != 'read'
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   notifications: Array<{
+   *     _id: string, recipientId: string, recipientType: 'patient',
+   *     type: string, title: string, message: string,
+   *     status: 'pending'|'sent'|'delivered'|'read'|'failed',
+   *     priority: 'low'|'medium'|'high'|'urgent',
+   *     channels?: string[], relatedId?: string, relatedType?: string,
+   *     sentAt?: string, deliveredAt?: string, readAt?: string,
+   *     expiresAt?: string, createdAt: string
+   *   }>
+   * }>}
+   */
+  getNotifications: async (filters = {}) => {
+    try {
+      const response = await api.get('/patient/notifications', { params: filters });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل الإشعارات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement PATCH /api/patient/notifications/:id/read */
+  /**
+   * Mark a notification as read.
+   *
+   * Backend sets notifications.status = 'read' and readAt = now.
+   *
+   * @param {string} notificationId
+   * @returns {Promise<{ success: true }>}
+   */
+  markNotificationRead: async (notificationId) => {
+    try {
+      const response = await api.patch(`/patient/notifications/${notificationId}/read`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 8 — REVIEWS
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: implement GET /api/patient/reviews */
+  /**
+   * List reviews submitted by the current patient.
+   *
+   * Backend scopes by reviewerPersonId OR reviewerChildId from JWT.
+   *
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   reviews: Array<{
+   *     _id: string, reviewerPersonId?: string, reviewerChildId?: string,
+   *     doctorId?: string, dentistId?: string, laboratoryId?: string,
+   *     pharmacyId?: string, hospitalId?: string,
+   *     visitId?: string, appointmentId?: string,
+   *     rating: 1|2|3|4|5, reviewText?: string,
+   *     status: 'pending'|'approved'|'rejected'|'flagged',
+   *     isAnonymous?: boolean, adminNote?: string,
+   *     createdAt: string, updatedAt: string
+   *   }>
+   * }>}
+   */
+  getMyReviews: async () => {
+    try {
+      const response = await api.get('/patient/reviews');
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل التقييمات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement POST /api/patient/reviews */
+  /**
+   * Submit a new review.
+   *
+   * Client-side validation: payload must include exactly one of doctorId,
+   * dentistId, laboratoryId, pharmacyId, hospitalId. Method throws
+   * { message: 'يجب اختيار جهة واحدة فقط للتقييم' } if this rule is violated.
+   *
+   * @param {object} payload
+   * @param {1|2|3|4|5} payload.rating
+   * @param {string} [payload.reviewText] - up to 1000 chars
+   * @param {boolean} [payload.isAnonymous]
+   * @param {string} [payload.doctorId]
+   * @param {string} [payload.dentistId]
+   * @param {string} [payload.laboratoryId]
+   * @param {string} [payload.pharmacyId]
+   * @param {string} [payload.hospitalId]
+   * @param {string} [payload.visitId]
+   * @param {string} [payload.appointmentId]
+   * @returns {Promise<{ success: true, review: object }>}
+   */
+  submitReview: async (payload) => {
+    // ── Client-side validation (amendment 1): exactly one target ─────────
+    const targetKeys = ['doctorId', 'dentistId', 'laboratoryId', 'pharmacyId', 'hospitalId'];
+    const targetCount = targetKeys.filter((k) => payload && payload[k]).length;
+    if (targetCount !== 1) {
+      throw { message: 'يجب اختيار جهة واحدة فقط للتقييم' };
+    }
+
+    try {
+      const response = await api.post('/patient/reviews', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إرسال التقييم';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 9 — AI ASSISTANT
+  // ════════════════════════════════════════════════════════════════
+
+  /* BACKEND TODO: already exists at /api/patient/ai-symptom-analysis (inline handler in routes/patient.js:197) — migrate to proper controller */
+  /**
+   * Specialist-recommender AI. Sends Arabic symptom text to the FastAPI
+   * service on :8001 and returns the suggested specialist, disease, and
+   * body system.
+   *
+   * Ephemeral: not persisted in v1 (no collection). Consider persisting
+   * to emergency_reports in a future pass if history is desired.
+   *
+   * @param {{ symptoms: string }} payload
+   * @returns {Promise<{
+   *   success: true,
+   *   data: { specialist: string, disease: string, organ_system: string }
+   * }>}
+   */
+  analyzeSymptoms: async (payload) => {
+    try {
+      const response = await api.post('/patient/ai-symptom-analysis', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحليل الأعراض';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement POST /api/patient/emergency-report — proxy to senior redwan Flask :8000, persist to emergency_reports */
+  /**
+   * Emergency triage AI (senior redwan). Sends text and/or image to the
+   * backend proxy which forwards to Flask :8000 (/predict/{text,image})
+   * and persists the AI response into the emergency_reports collection
+   * using patientPersonId OR patientChildId from JWT.
+   *
+   * v1 supports text and image only; voice and combined are valid schema
+   * enums but not accepted until HTTPS + mic flow lands (CLAUDE.md pending
+   * work item 8). Method throws on those inputType values.
+   *
+   * FormData keys:
+   *   - inputType: 'text' | 'image' (required)
+   *   - textDescription: string (optional)
+   *   - image: File (optional — required if inputType = 'image')
+   *   - location: JSON string '{"lat":..,"lng":..}' (optional)
+   *   - locationAccuracy: number — meters, from Geolocation API coords.accuracy (optional)
+   *
+   * Uses multipart/form-data with a 30s timeout to accommodate image upload.
+   *
+   * @param {FormData} formData
+   * @returns {Promise<{
+   *   success: true,
+   *   report: {
+   *     _id: string, patientPersonId?: string, patientChildId?: string,
+   *     reportedAt: string,
+   *     inputType: 'text'|'image',
+   *     textDescription?: string, imageUrl?: string,
+   *     aiRiskLevel: 'low'|'moderate'|'high'|'critical',
+   *     aiFirstAid: string[],
+   *     aiConfidence: number,
+   *     aiRawResponse?: string,
+   *     aiModelVersion?: string,
+   *     location?: object, locationAddress?: string, locationAccuracy?: number,
+   *     ambulanceCalled?: boolean, ambulanceStatus?: string,
+   *     status: 'active'|'resolved'|'false_alarm'|'referred_to_hospital',
+   *     createdAt: string
+   *   }
+   * }>}
+   */
+  submitEmergencyReport: async (formData) => {
+    // ── v1 inputType gate (amendment 3): reject voice/combined ───────────
+    const inputType = formData && typeof formData.get === 'function' ? formData.get('inputType') : null;
+    if (inputType === 'voice' || inputType === 'combined') {
+      throw { message: 'إدخال الصوت غير مدعوم في هذا الإصدار. يرجى استخدام النص أو الصورة.' };
+    }
+
+    try {
+      const response = await api.post('/patient/emergency-report', formData, {
+        headers: { 'Content-Type': 'multipart/form-data' },
+        timeout: 30000
+      });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في إرسال تقرير الطوارئ';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /* BACKEND TODO: implement GET /api/patient/emergency-reports */
+  /**
+   * List the patient's past emergency reports.
+   *
+   * Scoped by patientPersonId OR patientChildId from JWT. Sorted by
+   * reportedAt descending.
+   *
+   * @returns {Promise<{
+   *   success: true,
+   *   count: number,
+   *   reports: Array<{
+   *     _id: string, patientPersonId?: string, patientChildId?: string,
+   *     reportedAt: string, inputType: string,
+   *     textDescription?: string, imageUrl?: string,
+   *     aiRiskLevel: string, aiFirstAid: string[], aiConfidence: number,
+   *     aiModelVersion?: string, location?: object, locationAddress?: string,
+   *     ambulanceCalled?: boolean, ambulanceStatus?: string,
+   *     status: string, resolvedAt?: string, resolutionNote?: string,
+   *     createdAt: string
+   *   }>
+   * }>}
+   */
+  getEmergencyReports: async () => {
+    try {
+      const response = await api.get('/patient/emergency-reports');
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message || error.message || 'حدث خطأ في تحميل تقارير الطوارئ';
+      throw { message: errorMessage, ...error.response?.data };
+    }
   }
 };
 
