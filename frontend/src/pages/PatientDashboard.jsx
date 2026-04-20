@@ -1,2349 +1,3341 @@
-// src/pages/PatientDashboard.jsx
-// ✅ REDESIGNED - Professional Medical Visits Log with Animated BMI Scale
+/**
+ * PatientDashboard
+ *
+ * The patient's primary interface in the Patient 360° platform.
+ * Provides 9 sections (home, appointments, visits, prescriptions,
+ * lab-results, AI assistant, reviews, notifications, profile) in a
+ * sidebar + page-header + main-content layout styled with Teal Medica
+ * tokens.
+ *
+ * Every data interaction flows through `patientAPI` from
+ * services/api.js (23 stubs committed separately; most are backed by
+ * backend-team TODOs at the moment). UI degrades gracefully via
+ * openAlert-wrapped error states when the backend is unavailable.
+ *
+ * Dual-patient aware: reads `patientPersonId` and `patientChildId`
+ * from the getMyProfile response and carries them implicitly. No
+ * patient ID is passed in API call parameters — the backend resolves
+ * identity from JWT.
+ *
+ * Arabic RTL; LTR inputs (email display, national ID, phone) get
+ * dir="ltr" explicitly. All interactive elements keyboard-accessible;
+ * modal dismissal via Escape or backdrop click.
+ *
+ * Styling: see frontend/src/styles/PatientDashboard.css — pd-*
+ * namespace, var(--tm-*) tokens only.
+ */
 
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import Navbar from '../components/common/Navbar';
-import { authAPI } from '../services/api';
-import { useTheme } from '../context/ThemeProvider';
+
+import {
+  // Layout / nav
+  Menu, X, Bell, LogOut, ChevronDown, ChevronLeft, ChevronRight,
+  // Section icons
+  Home, Calendar, FileText, Pill, FlaskConical, Sparkles, Star, MessageSquare, User,
+  // Profile + medical
+  HeartPulse, Heart, Lock, Edit, MapPin, Phone, Mail, Activity, Stethoscope,
+  CreditCard, Droplet, Baby, GraduationCap, ShieldCheck, Hospital,
+  // Actions / status
+  Plus, Check, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon, Info,
+  Download, ExternalLink, Eye, Clock, RotateCcw, Filter, Search, Trash2,
+  MapPinned, Siren,
+  // AI input modalities (Image aliased to avoid DOM Image clash)
+  Image as ImageIcon, Mic,
+} from 'lucide-react';
+
+import { patientAPI, authAPI } from '../services/api';
+
+import InputModeToggle from '../components/ai/InputModeToggle';
+import InputText from '../components/ai/InputText';
+import InputImage from '../components/ai/InputImage';
+import ResultCard from '../components/ai/ResultCard';
+import SeverityBadge from '../components/ai/SeverityBadge';
+import FirstAidSteps from '../components/ai/FirstAidSteps';
+import ConfidenceBar from '../components/ai/ConfidenceBar';
+import EmptyState from '../components/ai/EmptyState';
+
+import LoadingSpinner from '../components/LoadingSpinner';
+
 import '../styles/PatientDashboard.css';
 
-/**
- * AI SERVICE CONFIG - CONNECTED TO BACKEND
- */
-const AI_SERVICE_CONFIG = {
-  isEnabled: true,
-  apiEndpoint: '/api/patient/ai-symptom-analysis',
-  timeout: 30000
-};
 
-/**
- * MAP AI RESPONSE TO DB SPECIALIZATIONS
- * Keys = AI model output names → Values = doctors.specialization DB enum
- */
-/**
- * BOOKING SPECIALIZATIONS — for appointment booking wizard
- * id must match doctors.specialization DB enum exactly
- */
-const BOOKING_SPECIALIZATIONS = [
-  { id: 'cardiology', nameAr: 'طب القلب', icon: '❤️' },
-  { id: 'pulmonology', nameAr: 'طب الرئة', icon: '🫁' },
-  { id: 'general_practice', nameAr: 'طب عام', icon: '🩺' },
-  { id: 'orthopedics', nameAr: 'جراحة العظام', icon: '🦿' },
-  { id: 'neurology', nameAr: 'طب الأعصاب', icon: '🧠' },
-  { id: 'endocrinology', nameAr: 'طب الغدد الصماء', icon: '⚗️' },
-  { id: 'dermatology', nameAr: 'طب الجلدية', icon: '🧴' },
-  { id: 'gastroenterology', nameAr: 'الجهاز الهضمي', icon: '🫃' },
-  { id: 'surgery', nameAr: 'الجراحة العامة', icon: '🔪' },
-  { id: 'urology', nameAr: 'المسالك البولية', icon: '💧' },
-  { id: 'gynecology', nameAr: 'النساء والتوليد', icon: '🤰' },
-  { id: 'psychiatry', nameAr: 'الطب النفسي', icon: '🧘' },
-  { id: 'hematology', nameAr: 'طب الدم', icon: '🩸' },
-  { id: 'oncology', nameAr: 'طب الأورام', icon: '🎗️' },
-  { id: 'otolaryngology', nameAr: 'أنف أذن حنجرة', icon: '👂' },
-  { id: 'ophthalmology', nameAr: 'طب العيون', icon: '👁️' },
-  { id: 'pediatrics', nameAr: 'طب الأطفال', icon: '👶' },
-  { id: 'nephrology', nameAr: 'طب الكلى', icon: '🫘' },
-  { id: 'internal_medicine', nameAr: 'الطب الباطني', icon: '🏨' },
-  { id: 'emergency_medicine', nameAr: 'طب الطوارئ', icon: '🚑' },
-  { id: 'rheumatology', nameAr: 'طب الروماتيزم', icon: '🦴' },
-  { id: 'vascular_surgery', nameAr: 'جراحة الأوعية', icon: '🫀' },
-  { id: 'anesthesiology', nameAr: 'طب التخدير', icon: '💉' },
-  { id: 'radiology', nameAr: 'الأشعة التشخيصية', icon: '📡' }
-];
+// ══════════════════════════════════════════════════════════════════════
+// Constants
+// ══════════════════════════════════════════════════════════════════════
 
-/**
- * MAP AI RESPONSE TO DB SPECIALIZATIONS
- * Keys = AI model output names → Values = doctors.specialization DB enum
- */
-const SPECIALIZATION_MAPPING = {
-  'Cardiologist': 'cardiology',
-  'Pulmonologist': 'pulmonology',
-  'General Practitioner': 'general_practice',
-  'Rheumatologist': 'rheumatology',
-  'Orthopedic Surgeon': 'orthopedics',
-  'Neurologist': 'neurology',
-  'Endocrinologist': 'endocrinology',
-  'Dermatologist': 'dermatology',
-  'Gastroenterologist': 'gastroenterology',
-  'General Surgeon': 'surgery',
-  'Urologist': 'urology',
-  'Gynecologist': 'gynecology',
-  'Psychiatrist': 'psychiatry',
-  'Hematologist': 'hematology',
-  'Hematologist/Oncologist': 'oncology',
-  'Oncologist': 'oncology',
-  'ENT Specialist': 'otolaryngology',
-  'Ophthalmologist': 'ophthalmology',
-  'Pediatrician': 'pediatrics',
-  'Nephrologist': 'nephrology',
-  'Internal Medicine': 'internal_medicine',
-  'Emergency Medicine': 'emergency_medicine',
-  'Anesthesiologist': 'anesthesiology',
-  'Radiologist': 'radiology',
-  'Vascular Surgeon': 'vascular_surgery'
-};
-
-/**
- * ALL 24 MEDICAL SPECIALIZATIONS — matches doctors.specialization DB enum
- */
-const MEDICAL_SPECIALIZATIONS = [
-  { id: 'cardiology', nameEn: 'Cardiology', nameAr: 'طب القلب', icon: '❤️', color: 'var(--tm-error, #D32F2F)', description: 'متخصص في تشخيص وعلاج أمراض القلب والأوعية الدموية' },
-  { id: 'pulmonology', nameEn: 'Pulmonology', nameAr: 'طب الرئة', icon: '🫁', color: 'var(--tm-action, #00897B)', description: 'متخصص في أمراض الجهاز التنفسي والرئتين' },
-  { id: 'general_practice', nameEn: 'General Practice', nameAr: 'طب عام', icon: '🩺', color: 'var(--tm-success, #00897B)', description: 'طبيب للفحص الشامل والتشخيص الأولي' },
-  { id: 'rheumatology', nameEn: 'Rheumatology', nameAr: 'طب الروماتيزم', icon: '🦴', color: '#8b5cf6', description: 'متخصص في أمراض المفاصل والروماتيزم' },
-  { id: 'orthopedics', nameEn: 'Orthopedics', nameAr: 'جراحة العظام', icon: '🦿', color: '#6366f1', description: 'متخصص في جراحة العظام والمفاصل' },
-  { id: 'neurology', nameEn: 'Neurology', nameAr: 'طب الأعصاب', icon: '🧠', color: '#ec4899', description: 'متخصص في أمراض الجهاز العصبي' },
-  { id: 'endocrinology', nameEn: 'Endocrinology', nameAr: 'طب الغدد الصماء', icon: '⚗️', color: 'var(--tm-accent, #4DB6AC)', description: 'متخصص في أمراض الغدد والهرمونات' },
-  { id: 'dermatology', nameEn: 'Dermatology', nameAr: 'طب الجلدية', icon: '🧴', color: '#f97316', description: 'متخصص في أمراض الجلد والشعر' },
-  { id: 'gastroenterology', nameEn: 'Gastroenterology', nameAr: 'طب الجهاز الهضمي', icon: '🫃', color: '#eab308', description: 'متخصص في أمراض الجهاز الهضمي' },
-  { id: 'surgery', nameEn: 'Surgery', nameAr: 'الجراحة العامة', icon: '🔪', color: '#64748b', description: 'متخصص في العمليات الجراحية العامة' },
-  { id: 'urology', nameEn: 'Urology', nameAr: 'طب المسالك البولية', icon: '💧', color: '#0ea5e9', description: 'متخصص في أمراض الكلى والمسالك البولية' },
-  { id: 'gynecology', nameEn: 'Gynecology', nameAr: 'طب النساء والتوليد', icon: '🤰', color: '#db2777', description: 'متخصص في صحة المرأة والحمل والولادة' },
-  { id: 'psychiatry', nameEn: 'Psychiatry', nameAr: 'الطب النفسي', icon: '🧘', color: '#7c3aed', description: 'متخصص في الصحة النفسية' },
-  { id: 'hematology', nameEn: 'Hematology', nameAr: 'طب الدم', icon: '🩸', color: '#be123c', description: 'متخصص في أمراض الدم' },
-  { id: 'oncology', nameEn: 'Oncology', nameAr: 'طب الأورام', icon: '🎗️', color: '#9333ea', description: 'متخصص في تشخيص وعلاج الأورام' },
-  { id: 'otolaryngology', nameEn: 'Otolaryngology (ENT)', nameAr: 'أنف أذن حنجرة', icon: '👂', color: '#059669', description: 'متخصص في أمراض الأذن والأنف والحنجرة' },
-  { id: 'ophthalmology', nameEn: 'Ophthalmology', nameAr: 'طب العيون', icon: '👁️', color: '#0284c7', description: 'متخصص في أمراض العيون' },
-  { id: 'pediatrics', nameEn: 'Pediatrics', nameAr: 'طب الأطفال', icon: '👶', color: '#f472b6', description: 'متخصص في صحة الأطفال والرضع' },
-  { id: 'nephrology', nameEn: 'Nephrology', nameAr: 'طب الكلى', icon: '🫘', color: '#2563eb', description: 'متخصص في أمراض الكلى' },
-  { id: 'internal_medicine', nameEn: 'Internal Medicine', nameAr: 'الطب الباطني', icon: '🏨', color: 'var(--tm-primary, #0D3B3E)', description: 'متخصص في الأمراض الباطنية' },
-  { id: 'emergency_medicine', nameEn: 'Emergency Medicine', nameAr: 'طب الطوارئ', icon: '🚑', color: '#dc2626', description: 'متخصص في حالات الطوارئ الطبية' },
-  { id: 'vascular_surgery', nameEn: 'Vascular Surgery', nameAr: 'جراحة الأوعية', icon: '🫀', color: '#a855f7', description: 'متخصص في جراحة الأوعية الدموية' },
-  { id: 'anesthesiology', nameEn: 'Anesthesiology', nameAr: 'طب التخدير', icon: '💉', color: '#78716c', description: 'متخصص في التخدير والرعاية المحيطة بالجراحة' },
-  { id: 'radiology', nameEn: 'Radiology', nameAr: 'الأشعة التشخيصية', icon: '📡', color: '#0891b2', description: 'متخصص في التصوير الطبي والأشعة' }
-];
-
-const consultationAPI = {
-  analyzeSymptoms: async (symptoms) => {
-    if (!AI_SERVICE_CONFIG.isEnabled) throw new Error('AI_SERVICE_NOT_ENABLED');
-    
-    const token = localStorage.getItem('token');
-    const response = await fetch(`http://localhost:5000${AI_SERVICE_CONFIG.apiEndpoint}`, {
-      method: 'POST',
-      headers: { 
-        'Content-Type': 'application/json', 
-        'Authorization': `Bearer ${token}` 
-      },
-      body: JSON.stringify({ symptoms }),
-      signal: AbortSignal.timeout(AI_SERVICE_CONFIG.timeout)
-    });
-    
-    if (!response.ok) throw new Error(`API_ERROR_${response.status}`);
-    return await response.json();
+const SECTION_META = {
+  home: {
+    key: 'home',
+    title: 'الرئيسية',
+    subtitle: 'نظرة عامة على حالتك الصحية',
+    icon: Home,
   },
-  
-  getSpecializationByName: (specialistName) => {
-    const specializationId = SPECIALIZATION_MAPPING[specialistName];
-    if (!specializationId) return null;
-    return MEDICAL_SPECIALIZATIONS.find(s => s.id === specializationId) || null;
+  appointments: {
+    key: 'appointments',
+    title: 'المواعيد',
+    subtitle: 'إدارة المواعيد القادمة والسابقة',
+    icon: Calendar,
+  },
+  visits: {
+    key: 'visits',
+    title: 'الزيارات الطبية',
+    subtitle: 'سجل الزيارات والفحوصات السابقة',
+    icon: FileText,
+  },
+  prescriptions: {
+    key: 'prescriptions',
+    title: 'الوصفات الطبية',
+    subtitle: 'الوصفات النشطة والمصروفة',
+    icon: Pill,
+  },
+  'lab-results': {
+    key: 'lab-results',
+    title: 'نتائج المختبر',
+    subtitle: 'نتائج الفحوصات المخبرية',
+    icon: FlaskConical,
+  },
+  'ai-assistant': {
+    key: 'ai-assistant',
+    title: 'المساعد الذكي',
+    subtitle: 'استشارة الأخصائي والإسعاف الأولي',
+    icon: Sparkles,
+  },
+  reviews: {
+    key: 'reviews',
+    title: 'التقييمات',
+    subtitle: 'تقييم الأطباء والمختبرات والصيدليات',
+    icon: Star,
+  },
+  notifications: {
+    key: 'notifications',
+    title: 'الإشعارات',
+    subtitle: 'التنبيهات والتذكيرات',
+    icon: Bell,
+  },
+  profile: {
+    key: 'profile',
+    title: 'الملف الشخصي',
+    subtitle: 'معلوماتك الشخصية والطبية',
+    icon: User,
+  },
+};
+
+const SIDEBAR_GROUPS = [
+  {
+    label: 'الرئيسية',
+    items: [SECTION_META.home],
+  },
+  {
+    label: 'الرعاية',
+    items: [
+      SECTION_META.appointments,
+      SECTION_META.visits,
+      SECTION_META.prescriptions,
+      SECTION_META['lab-results'],
+    ],
+  },
+  {
+    label: 'المساعد الذكي',
+    items: [SECTION_META['ai-assistant']],
+  },
+  {
+    label: 'حسابي',
+    items: [
+      SECTION_META.reviews,
+      SECTION_META.notifications,
+      SECTION_META.profile,
+    ],
+  },
+];
+
+
+// ══════════════════════════════════════════════════════════════════════
+// Date / text helpers
+// ══════════════════════════════════════════════════════════════════════
+
+const ARABIC_DATE_LOCALE = 'ar-SY';
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat(ARABIC_DATE_LOCALE, {
+      year: 'numeric',
+      month: 'long',
+      day: 'numeric',
+    }).format(new Date(iso));
+  } catch {
+    return '—';
   }
-};
+}
 
-/**
- * BMI Scale Component - Professional Animated Scale
- */
-const BMIScaleIndicator = ({ bmi, weight, height }) => {
-  const [animatedPosition, setAnimatedPosition] = useState(0);
-  const [isVisible, setIsVisible] = useState(false);
-  
+function formatTime(iso) {
+  if (!iso) return '—';
+  try {
+    return new Intl.DateTimeFormat(ARABIC_DATE_LOCALE, {
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(iso));
+  } catch {
+    return '—';
+  }
+}
+
+function formatDateTime(iso) {
+  if (!iso) return '—';
+  return `${formatDate(iso)} — ${formatTime(iso)}`;
+}
+
+function formatAge(dateOfBirth) {
+  if (!dateOfBirth) return null;
+  const dob = new Date(dateOfBirth);
+  if (Number.isNaN(dob.getTime())) return null;
+  const now = new Date();
+  let age = now.getFullYear() - dob.getFullYear();
+  const m = now.getMonth() - dob.getMonth();
+  if (m < 0 || (m === 0 && now.getDate() < dob.getDate())) age--;
+  return age;
+}
+
+function buildFullName(identity) {
+  if (!identity) return '';
+  return [identity.firstName, identity.fatherName, identity.lastName]
+    .filter(Boolean)
+    .join(' ');
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// Modal primitive
+// ══════════════════════════════════════════════════════════════════════
+
+function Modal({ isOpen, onClose, size = 'md', children }) {
   useEffect(() => {
-    if (bmi) {
-      setIsVisible(true);
-      // Animate to position after mount
-      const timer = setTimeout(() => {
-        // Calculate position (BMI range 15-40 mapped to 0-100%)
-        const minBMI = 15;
-        const maxBMI = 40;
-        const clampedBMI = Math.max(minBMI, Math.min(maxBMI, parseFloat(bmi)));
-        const position = ((clampedBMI - minBMI) / (maxBMI - minBMI)) * 100;
-        setAnimatedPosition(position);
-      }, 300);
-      return () => clearTimeout(timer);
-    }
-  }, [bmi]);
+    if (!isOpen) return undefined;
+    const handleKey = (e) => {
+      if (e.key === 'Escape') onClose();
+    };
+    document.addEventListener('keydown', handleKey);
+    return () => document.removeEventListener('keydown', handleKey);
+  }, [isOpen, onClose]);
 
-  if (!bmi) return null;
-
-  const getBMICategory = (value) => {
-    const b = parseFloat(value);
-    if (b < 18.5) return { label: 'نقص الوزن', labelEn: 'Underweight', color: 'var(--tm-action, #00897B)', class: 'underweight' };
-    if (b < 25) return { label: 'وزن طبيعي', labelEn: 'Normal', color: 'var(--tm-success, #00897B)', class: 'normal' };
-    if (b < 30) return { label: 'وزن زائد', labelEn: 'Overweight', color: 'var(--tm-warning, #F57C00)', class: 'overweight' };
-    return { label: 'سمنة', labelEn: 'Obese', color: 'var(--tm-error, #D32F2F)', class: 'obese' };
-  };
-
-  const category = getBMICategory(bmi);
+  if (!isOpen) return null;
 
   return (
-    <div className={`bmi-scale-container ${isVisible ? 'visible' : ''}`}>
-      <div className="bmi-scale-header">
-        <div className="bmi-scale-title">
-          <span className="bmi-icon">⚖️</span>
-          <div>
-            <h4>مؤشر كتلة الجسم</h4>
-            <p>Body Mass Index (BMI)</p>
-          </div>
-        </div>
-        <div className="bmi-value-display" style={{ '--category-color': category.color }}>
-          <span className="bmi-number">{bmi}</span>
-          <span className="bmi-unit">kg/m²</span>
-        </div>
-      </div>
-
-      <div className="bmi-scale-wrapper">
-        {/* Scale Numbers */}
-        <div className="bmi-scale-numbers">
-          <span>15</span>
-          <span>18.5</span>
-          <span>25</span>
-          <span>30</span>
-          <span>40</span>
-        </div>
-
-        {/* Scale Bar */}
-        <div className="bmi-scale-bar">
-          <div className="bmi-zone underweight" style={{ width: '14%' }}>
-            <span className="zone-label">نقص</span>
-          </div>
-          <div className="bmi-zone normal" style={{ width: '26%' }}>
-            <span className="zone-label">طبيعي</span>
-          </div>
-          <div className="bmi-zone overweight" style={{ width: '20%' }}>
-            <span className="zone-label">زائد</span>
-          </div>
-          <div className="bmi-zone obese" style={{ width: '40%' }}>
-            <span className="zone-label">سمنة</span>
-          </div>
-          
-          {/* Animated Indicator */}
-          <div 
-            className="bmi-indicator"
-            style={{ 
-              left: `${animatedPosition}%`,
-              '--indicator-color': category.color 
-            }}
-          >
-            <div className="indicator-pin">
-              <div className="indicator-dot"></div>
-              <div className="indicator-line"></div>
-            </div>
-            <div className="indicator-value">{bmi}</div>
-          </div>
-        </div>
-
-        {/* Category Labels */}
-        <div className="bmi-category-labels">
-          <span className="category-underweight">&lt;18.5</span>
-          <span className="category-normal">18.5-24.9</span>
-          <span className="category-overweight">25-29.9</span>
-          <span className="category-obese">≥30</span>
-        </div>
-      </div>
-
-      {/* Result Badge */}
-      <div className={`bmi-result-badge ${category.class}`}>
-        <div className="result-icon">
-          {category.class === 'underweight' && '📉'}
-          {category.class === 'normal' && '✅'}
-          {category.class === 'overweight' && '⚠️'}
-          {category.class === 'obese' && '🔴'}
-        </div>
-        <div className="result-text">
-          <span className="result-label-ar">{category.label}</span>
-          <span className="result-label-en">{category.labelEn}</span>
-        </div>
-        {weight && height && (
-          <div className="result-details">
-            <span>الوزن: {weight} كجم</span>
-            <span>الطول: {height} سم</span>
-          </div>
-        )}
+    <div
+      className="pd-modal-backdrop"
+      role="dialog"
+      aria-modal="true"
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onClose();
+      }}
+    >
+      <div className={`pd-modal pd-modal--${size}`}>
+        {children}
       </div>
     </div>
   );
-};
+}
 
-/**
- * Professional Visit Details Accordion Component
- */
-const VisitDetailsAccordion = ({ visit, isExpanded, onToggle, formatDateTime }) => {
-  const contentRef = useRef(null);
-  const [contentHeight, setContentHeight] = useState(0);
 
-  useEffect(() => {
-    if (contentRef.current) {
-      setContentHeight(contentRef.current.scrollHeight);
-    }
-  }, [isExpanded, visit]);
+// ══════════════════════════════════════════════════════════════════════
+// Module-scope form components
+// ══════════════════════════════════════════════════════════════════════
 
-  const getDoctorName = () => {
-    if (visit.doctorId?.firstName && visit.doctorId?.lastName) {
-      return `د. ${visit.doctorId.firstName} ${visit.doctorId.lastName}`;
-    }
-    return 'طبيب';
-  };
+const CANCELLATION_REASONS = [
+  { value: 'patient_request',    label: 'طلب المريض'      },
+  { value: 'doctor_unavailable', label: 'الطبيب غير متاح' },
+  { value: 'emergency',          label: 'حالة طارئة'       },
+  { value: 'duplicate',          label: 'موعد مكرر'        },
+  { value: 'other',              label: 'سبب آخر'           },
+];
 
-  const getSpecialization = () => {
-    return visit.doctorId?.specialization || visit.specialization || 'طب عام';
-  };
+function AppointmentCancelForm({ appointment, onCancel, onConfirm, submitting }) {
+  const [reason, setReason] = useState('patient_request');
 
   return (
-    <div className={`visit-accordion ${isExpanded ? 'expanded' : ''}`}>
-      {/* Accordion Header */}
-      <div className="visit-accordion-header" onClick={onToggle}>
-        <div className="visit-header-main">
-          {/* Timeline Dot */}
-          <div className="timeline-connector">
-            <div className="timeline-dot">
-              <span className="dot-pulse"></span>
-            </div>
-            <div className="timeline-line"></div>
-          </div>
-
-          {/* Visit Summary */}
-          <div className="visit-summary">
-            <div className="visit-date-badge">
-              <span className="date-icon">📅</span>
-              <span className="date-text">{formatDateTime(visit.visitDate)}</span>
-            </div>
-            
-            <div className="doctor-info-badge">
-              <div className="doctor-avatar">
-                <span>👨‍⚕️</span>
-              </div>
-              <div className="doctor-details">
-                <span className="doctor-name">{getDoctorName()}</span>
-                <span className="doctor-spec">{getSpecialization()}</span>
-              </div>
-            </div>
-          </div>
-
-          {/* Quick Preview */}
-          <div className="visit-quick-preview">
-            {visit.chiefComplaint && (
-              <div className="preview-chip complaint">
-                <span className="chip-icon">💬</span>
-                <span className="chip-text">{visit.chiefComplaint.substring(0, 40)}...</span>
-              </div>
-            )}
-            {visit.diagnosis && (
-              <div className="preview-chip diagnosis">
-                <span className="chip-icon">🔬</span>
-                <span className="chip-text">{visit.diagnosis.substring(0, 30)}...</span>
-              </div>
-            )}
-          </div>
-
-          {/* Expand Button */}
-          <button className="expand-btn">
-            <span className="expand-icon">{isExpanded ? '▲' : '▼'}</span>
-            <span className="expand-text">{isExpanded ? 'إخفاء' : 'التفاصيل'}</span>
-          </button>
-        </div>
+    <>
+      <div className="pd-modal-header pd-modal-header--warning">
+        <AlertTriangle size={20} aria-hidden="true" />
+        <h3 className="pd-modal-title">إلغاء الموعد</h3>
+        <button type="button" className="pd-modal-close" onClick={onCancel} aria-label="إغلاق">
+          <X size={18} aria-hidden="true" />
+        </button>
       </div>
-
-      {/* Accordion Content */}
-      <div 
-        className="visit-accordion-content"
-        style={{ maxHeight: isExpanded ? `${contentHeight}px` : '0px' }}
-      >
-        <div className="content-inner" ref={contentRef}>
-          {/* Doctor Information Section */}
-          <div className="detail-section doctor-section">
-            <div className="section-header">
-              <span className="section-icon">👨‍⚕️</span>
-              <h4>معلومات الطبيب المعالج</h4>
-              <span className="section-badge purple">Physician Info</span>
-            </div>
-            <div className="doctor-info-card">
-              <div className="doctor-avatar-large">
-                <span>👨‍⚕️</span>
-                <div className="avatar-ring"></div>
-              </div>
-              <div className="doctor-info-content">
-                <div className="info-row">
-                  <span className="info-label">الاسم:</span>
-                  <span className="info-value">{getDoctorName()}</span>
-                </div>
-                <div className="info-row">
-                  <span className="info-label">التخصص:</span>
-                  <span className="info-value specialization-badge">{getSpecialization()}</span>
-                </div>
-                {visit.doctorId?.hospitalAffiliation && (
-                  <div className="info-row">
-                    <span className="info-label">المؤسسة:</span>
-                    <span className="info-value">{visit.doctorId.hospitalAffiliation}</span>
-                  </div>
-                )}
-              </div>
-            </div>
+      <div className="pd-modal-body">
+        <p className="pd-modal-message">
+          هل أنت متأكد من إلغاء موعد{' '}
+          <strong dir="auto">{appointment?.reasonForVisit || 'الزيارة'}</strong>؟
+        </p>
+        <fieldset className="pd-form-group">
+          <legend className="pd-form-label">سبب الإلغاء</legend>
+          <div className="pd-radio-group">
+            {CANCELLATION_REASONS.map((opt) => (
+              <label key={opt.value} className="pd-radio">
+                <input
+                  type="radio"
+                  name="cancellationReason"
+                  value={opt.value}
+                  checked={reason === opt.value}
+                  onChange={(e) => setReason(e.target.value)}
+                  disabled={submitting}
+                />
+                <span>{opt.label}</span>
+              </label>
+            ))}
           </div>
-
-          {/* Chief Complaint Section */}
-          {visit.chiefComplaint && (
-            <div className="detail-section complaint-section">
-              <div className="section-header">
-                <span className="section-icon">💬</span>
-                <h4>الشكوى الرئيسية</h4>
-                <span className="section-badge blue">Chief Complaint</span>
-              </div>
-              <div className="section-content highlight-box blue">
-                <p>{visit.chiefComplaint}</p>
-              </div>
-            </div>
-          )}
-
-          {/* Diagnosis Section */}
-          {visit.diagnosis && (
-            <div className="detail-section diagnosis-section">
-              <div className="section-header">
-                <span className="section-icon">🔬</span>
-                <h4>التشخيص</h4>
-                <span className="section-badge green">Diagnosis</span>
-              </div>
-              <div className="section-content highlight-box green">
-                <div className="diagnosis-content">
-                  <div className="diagnosis-icon">🩺</div>
-                  <p>{visit.diagnosis}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* Vital Signs Section */}
-          {visit.vitalSigns && Object.keys(visit.vitalSigns).some(k => visit.vitalSigns[k]) && (
-            <div className="detail-section vitals-section">
-              <div className="section-header">
-                <span className="section-icon">📊</span>
-                <h4>العلامات الحيوية</h4>
-                <span className="section-badge orange">Vital Signs</span>
-              </div>
-              <div className="vitals-grid">
-                {visit.vitalSigns.bloodPressureSystolic && (
-                  <div className="vital-card">
-                    <div className="vital-icon">🩺</div>
-                    <div className="vital-info">
-                      <span className="vital-label">ضغط الدم</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.bloodPressureSystolic}/{visit.vitalSigns.bloodPressureDiastolic}
-                        <small>mmHg</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.heartRate && (
-                  <div className="vital-card">
-                    <div className="vital-icon">💓</div>
-                    <div className="vital-info">
-                      <span className="vital-label">نبض القلب</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.heartRate}
-                        <small>BPM</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.temperature && (
-                  <div className="vital-card">
-                    <div className="vital-icon">🌡️</div>
-                    <div className="vital-info">
-                      <span className="vital-label">الحرارة</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.temperature}
-                        <small>°C</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.oxygenSaturation && (
-                  <div className="vital-card">
-                    <div className="vital-icon">🫁</div>
-                    <div className="vital-info">
-                      <span className="vital-label">الأكسجين</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.oxygenSaturation}
-                        <small>%</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.bloodGlucose && (
-                  <div className="vital-card">
-                    <div className="vital-icon">🩸</div>
-                    <div className="vital-info">
-                      <span className="vital-label">السكر</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.bloodGlucose}
-                        <small>mg/dL</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.weight && (
-                  <div className="vital-card">
-                    <div className="vital-icon">⚖️</div>
-                    <div className="vital-info">
-                      <span className="vital-label">الوزن</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.weight}
-                        <small>kg</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.height && (
-                  <div className="vital-card">
-                    <div className="vital-icon">📏</div>
-                    <div className="vital-info">
-                      <span className="vital-label">الطول</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.height}
-                        <small>cm</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-                {visit.vitalSigns.respiratoryRate && (
-                  <div className="vital-card">
-                    <div className="vital-icon">💨</div>
-                    <div className="vital-info">
-                      <span className="vital-label">التنفس</span>
-                      <span className="vital-value">
-                        {visit.vitalSigns.respiratoryRate}
-                        <small>/min</small>
-                      </span>
-                    </div>
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-
-          {/* Medications Section */}
-          {visit.prescribedMedications && visit.prescribedMedications.length > 0 && (
-            <div className="detail-section medications-section">
-              <div className="section-header">
-                <span className="section-icon">💊</span>
-                <h4>الأدوية الموصوفة</h4>
-                <span className="section-badge purple">
-                  {visit.prescribedMedications.length} دواء
-                </span>
-              </div>
-              <div className="medications-list">
-                {visit.prescribedMedications.map((med, index) => (
-                  <div key={index} className="medication-card">
-                    <div className="med-header">
-                      <div className="med-icon">💊</div>
-                      <h5 className="med-name">{med.medicationName}</h5>
-                    </div>
-                    <div className="med-details">
-                      <div className="med-detail-item">
-                        <span className="detail-label">الجرعة:</span>
-                        <span className="detail-value">{med.dosage}</span>
-                      </div>
-                      <div className="med-detail-item">
-                        <span className="detail-label">التكرار:</span>
-                        <span className="detail-value">{med.frequency}</span>
-                      </div>
-                      {med.duration && (
-                        <div className="med-detail-item">
-                          <span className="detail-label">المدة:</span>
-                          <span className="detail-value">{med.duration}</span>
-                        </div>
-                      )}
-                      {med.route && (
-                        <div className="med-detail-item">
-                          <span className="detail-label">طريقة الاستخدام:</span>
-                          <span className="detail-value route-badge">
-                            {med.route === 'oral' ? '💊 فموي' :
-                             med.route === 'injection' ? '💉 حقن' :
-                             med.route === 'topical' ? '🧴 موضعي' :
-                             med.route === 'inhalation' ? '🫁 استنشاق' :
-                             med.route === 'sublingual' ? '👅 تحت اللسان' :
-                             med.route === 'rectal' ? 'شرجي' : med.route}
-                          </span>
-                        </div>
-                      )}
-                      {med.instructions && (
-                        <div className="med-detail-item full-width">
-                          <span className="detail-label">التعليمات:</span>
-                          <span className="detail-value">{med.instructions}</span>
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-
-          {/* Doctor Notes Section */}
-          {visit.doctorNotes && (
-            <div className="detail-section notes-section">
-              <div className="section-header">
-                <span className="section-icon">📝</span>
-                <h4>ملاحظات الطبيب</h4>
-                <span className="section-badge teal">Doctor Notes</span>
-              </div>
-              <div className="section-content highlight-box teal">
-                <div className="notes-content">
-                  <div className="notes-icon">📋</div>
-                  <p>{visit.doctorNotes}</p>
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* ECG Analysis if available */}
-          {visit.ecgAnalysis && (
-            <div className="detail-section ecg-section">
-              <div className="section-header">
-                <span className="section-icon">❤️</span>
-                <h4>نتائج تخطيط القلب (ECG)</h4>
-                <span className="section-badge red">ECG Analysis</span>
-              </div>
-              <div className="section-content highlight-box red">
-                {visit.ecgAnalysis.topPrediction && (
-                  <div className="ecg-top-result">
-                    <span className="ecg-label">التشخيص الرئيسي:</span>
-                    <span className="ecg-value">{visit.ecgAnalysis.topPrediction}</span>
-                  </div>
-                )}
-                {visit.ecgAnalysis.recommendation && (
-                  <div className="ecg-recommendation">
-                    <span className="ecg-label">التوصية:</span>
-                    <p>{visit.ecgAnalysis.recommendation}</p>
-                  </div>
-                )}
-                {visit.ecgAnalysis.predictions && visit.ecgAnalysis.predictions.length > 0 && (
-                  <div className="ecg-predictions">
-                    {visit.ecgAnalysis.predictions.map((pred, idx) => (
-                      <div key={idx} className="ecg-prediction-item">
-                        <span className="pred-class">{pred.arabicLabel || pred.class}</span>
-                        <div className="pred-bar-wrapper">
-                          <div className="pred-bar" style={{ width: `${pred.confidence}%` }}></div>
-                        </div>
-                        <span className="pred-confidence">{pred.confidence?.toFixed(1)}%</span>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-          )}
-        </div>
+        </fieldset>
       </div>
-    </div>
+      <div className="pd-modal-footer">
+        <button type="button" className="pd-btn pd-btn--ghost" onClick={onCancel} disabled={submitting}>
+          تراجع
+        </button>
+        <button
+          type="button"
+          className="pd-btn pd-btn--danger"
+          onClick={() => onConfirm({ cancellationReason: reason })}
+          disabled={submitting}
+        >
+          {submitting ? '...' : 'تأكيد الإلغاء'}
+        </button>
+      </div>
+    </>
   );
-};
+}
 
-const PatientDashboard = () => {
-  const navigate = useNavigate();
-  const { theme } = useTheme();
-  const [user, setUser] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [modal, setModal] = useState({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
-  const [visits, setVisits] = useState([]);
-  const [loadingVisits, setLoadingVisits] = useState(false);
-  const [medications, setMedications] = useState([]);
-  const [loadingMedications, setLoadingMedications] = useState(false);
-  const [appointments, setAppointments] = useState([]);
-  const [loadingAppointments, setLoadingAppointments] = useState(false);
-  const [labResults, setLabResults] = useState([]);
-  const [loadingLabResults, setLoadingLabResults] = useState(false);
-  const [prescriptions, setPrescriptions] = useState([]);
-  const [loadingPrescriptions, setLoadingPrescriptions] = useState(false);
-  const [expandedVisit, setExpandedVisit] = useState(null);
-  const [activeSection, setActiveSection] = useState('overview');
-  const [symptoms, setSymptoms] = useState('');
-  const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [consultationResult, setConsultationResult] = useState(null);
-  const [consultationError, setConsultationError] = useState(null);
-  const resultRef = useRef(null);
 
-  // ── Booking Wizard State ────────────────────────────────────────
-  const [bookingStep, setBookingStep] = useState(0); // 0=closed, 1=specialization, 2=doctor, 3=slot, 4=confirm
-  const [bookingSpec, setBookingSpec] = useState('');
-  const [bookingDoctors, setBookingDoctors] = useState([]);
-  const [bookingDoctorsLoading, setBookingDoctorsLoading] = useState(false);
+function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
+  const [step, setStep] = useState('search');
+  const [specialization, setSpecialization] = useState('');
+  const [doctors, setDoctors] = useState([]);
+  const [doctorsLoading, setDoctorsLoading] = useState(false);
   const [selectedDoctor, setSelectedDoctor] = useState(null);
-  const [doctorSlots, setDoctorSlots] = useState([]);
+  const [slots, setSlots] = useState([]);
   const [slotsLoading, setSlotsLoading] = useState(false);
   const [selectedSlot, setSelectedSlot] = useState(null);
-  const [bookingReason, setBookingReason] = useState('');
-  const [bookingSubmitting, setBookingSubmitting] = useState(false);
+  const [reasonForVisit, setReasonForVisit] = useState('');
+  const [priority, setPriority] = useState('routine');
+  const [submitting, setSubmitting] = useState(false);
 
-  const handleAnalyzeSymptoms = async () => {
-    if (!symptoms.trim()) { 
-      setConsultationError('Please enter your symptoms'); 
-      return; 
-    }
-    
-    if (!AI_SERVICE_CONFIG.isEnabled) { 
-      setConsultationError('SERVICE_NOT_AVAILABLE'); 
-      return; 
-    }
-    
-    setIsAnalyzing(true); 
-    setConsultationError(null); 
-    setConsultationResult(null);
-    
+  const handleSearch = async (e) => {
+    e?.preventDefault();
+    setDoctorsLoading(true);
     try {
-      console.log('📝 Analyzing symptoms:', symptoms);
-      const response = await consultationAPI.analyzeSymptoms(symptoms);
-      console.log('✅ AI Response:', response);
-      
-      if (response.success && response.data) {
-        const specialistName = response.data.specialist;
-        console.log('🔍 Looking for specialist:', specialistName);
-        const spec = consultationAPI.getSpecializationByName(specialistName);
-        
-        if (spec) {
-          console.log('✅ Found specialization:', spec);
-          setConsultationResult({ 
-            specialization: spec, 
-            disease: response.data.disease,
-            organSystem: response.data.organ_system,
-            inputSymptoms: symptoms 
-          });
-          setTimeout(() => resultRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' }), 100);
-        } else {
-          console.error('❌ Specialization not found for:', specialistName);
-          setConsultationError('SPECIALIZATION_NOT_FOUND');
-        }
-      } else {
-        console.error('❌ Invalid response:', response);
-        setConsultationError('INVALID_RESPONSE');
+      const res = await patientAPI.searchDoctors(
+        specialization ? { specialization } : {}
+      );
+      if (res?.success) {
+        setDoctors(Array.isArray(res.doctors) ? res.doctors : []);
       }
-    } catch (error) { 
-      console.error('❌ AI Analysis Error:', error);
-      if (error.message.includes('503')) {
-        setConsultationError('AI service unavailable. Please try again later.');
-      } else if (error.message.includes('504')) {
-        setConsultationError('Request timeout. Please try again.');
-      } else {
-        setConsultationError('An error occurred during analysis.');
-      }
-    }
-    finally { 
-      setIsAnalyzing(false); 
-    }
-  };
-
-  const resetConsultation = () => { 
-    setSymptoms(''); 
-    setConsultationResult(null); 
-    setConsultationError(null); 
-  };
-  
-  const openModal = (type, title, message, onConfirm = null) => setModal({ isOpen: true, type, title, message, onConfirm });
-  const closeModal = () => setModal({ isOpen: false, type: '', title: '', message: '', onConfirm: null });
-  const handleModalConfirm = () => { if (modal.onConfirm) modal.onConfirm(); closeModal(); };
-
-  useEffect(() => {
-    const loadData = async () => {
-      setLoading(true);
-      const currentUser = authAPI.getCurrentUser();
-      if (!currentUser) { 
-        openModal('error', 'غير مصرح', 'يجب عليك تسجيل الدخول أولاً', () => navigate('/')); 
-        return; 
-      }
-      if (currentUser.roles?.[0] !== 'patient') { 
-        openModal('error', 'غير مصرح', 'هذه الصفحة متاحة للمرضى فقط', () => navigate('/')); 
-        return; 
-      }
-      setUser(currentUser); 
-      setVisits([]); 
-      setLoading(false);
-    };
-    loadData();
-  }, [navigate]);
-
-  useEffect(() => {
-    const loadVisits = async () => {
-      if (!user) return;
-      setLoadingVisits(true);
-      
-      try {
-        const token = localStorage.getItem('token');
-        console.log('📋 Loading patient visits...');
-        
-        const response = await fetch('http://localhost:5000/api/patient/visits', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        
-        const data = await response.json();
-        console.log('📥 Visits response:', data);
-        
-        if (response.ok && data.success) {
-          setVisits(data.visits || []);
-        } else {
-          console.error('Failed to load visits:', data.message);
-          setVisits([]);
-        }
-      } catch (error) {
-        console.error('❌ Error loading visits:', error);
-        setVisits([]);
-      } finally {
-        setLoadingVisits(false);
-      }
-    };
-    
-    loadVisits();
-  }, [user]);
-
-  useEffect(() => {
-  const loadMedications = async () => {
-    if (!user) return;
-    
-    setLoadingMedications(true);
-    
-    try {
-      const token = localStorage.getItem('token');
-      
-      console.log('💊 Loading medications...');
-      
-      // Load current medications
-      const medsResponse = await fetch('http://localhost:5000/api/patient/medications', {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      
-      const medsData = await medsResponse.json();
-      console.log('📥 Medications response:', medsData);
-      
-      if (medsResponse.ok && medsData.success) {
-        setMedications(medsData.medications || []);
-      }
-  
-      
-      console.log('🔍 Final Medications:', medsData.medications);
-      
-
-    } catch (error) {
-      console.error('❌ Error loading medications:', error);
+    } catch (err) {
+      openAlert('error', 'تعذر البحث عن الأطباء', err?.message || 'حدث خطأ');
     } finally {
-      setLoadingMedications(false);
+      setDoctorsLoading(false);
     }
   };
-  
-  loadMedications();
-}, [user]);
 
-  // Load Appointments
-  useEffect(() => {
-    const loadAppointments = async () => {
-      if (!user) return;
-      setLoadingAppointments(true);
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/patient/appointments', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (response.ok && data.success) {
-          setAppointments(data.appointments || []);
-        }
-      } catch (error) {
-        console.error('Error loading appointments:', error);
-      } finally {
-        setLoadingAppointments(false);
-      }
-    };
-    loadAppointments();
-  }, [user]);
-
-  // Load Lab Results
-  useEffect(() => {
-    const loadLabResults = async () => {
-      if (!user) return;
-      setLoadingLabResults(true);
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/patient/lab-results', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (response.ok && data.success) {
-          setLabResults(data.labTests || []);
-        }
-      } catch (error) {
-        console.error('Error loading lab results:', error);
-      } finally {
-        setLoadingLabResults(false);
-      }
-    };
-    loadLabResults();
-  }, [user]);
-
-  // Load Prescriptions
-  useEffect(() => {
-    const loadPrescriptions = async () => {
-      if (!user) return;
-      setLoadingPrescriptions(true);
-      try {
-        const token = localStorage.getItem('token');
-        const response = await fetch('http://localhost:5000/api/patient/prescriptions', {
-          headers: { 'Authorization': `Bearer ${token}` }
-        });
-        const data = await response.json();
-        if (response.ok && data.success) {
-          setPrescriptions(data.prescriptions || []);
-        }
-      } catch (error) {
-        console.error('Error loading prescriptions:', error);
-      } finally {
-        setLoadingPrescriptions(false);
-      }
-    };
-    loadPrescriptions();
-  }, [user]);
-
-  // ══════════════════════════════════════════════════════════════
-  // BOOKING WIZARD — Appointment Reservation Flow
-  // ══════════════════════════════════════════════════════════════
-
-  /** Step 1 → Step 2: Select specialization → load doctors */
-  const handleSelectSpecialization = async (specId) => {
-    setBookingSpec(specId);
-    setBookingDoctors([]);
-    setSelectedDoctor(null);
-    setDoctorSlots([]);
-    setSelectedSlot(null);
-    setBookingStep(2);
-    setBookingDoctorsLoading(true);
-
-    try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/patient/doctors?specialization=${specId}`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setBookingDoctors(data.doctors || []);
-      }
-    } catch (e) { console.error('Load doctors error:', e); }
-    finally { setBookingDoctorsLoading(false); }
-  };
-
-  /** Step 2 → Step 3: Select doctor → load available slots */
-  const handleSelectDoctor = async (doctor) => {
+  const handlePickDoctor = async (doctor) => {
     setSelectedDoctor(doctor);
-    setDoctorSlots([]);
-    setSelectedSlot(null);
-    setBookingStep(3);
     setSlotsLoading(true);
-
+    setStep('slots');
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch(`http://localhost:5000/api/patient/doctors/${doctor._id}/slots`, {
-        headers: { 'Authorization': `Bearer ${token}` }
-      });
-      const data = await res.json();
-      if (res.ok && data.success) {
-        setDoctorSlots(data.slots || []);
+      const res = await patientAPI.getDoctorSlots(doctor._id);
+      if (res?.success) {
+        setSlots(
+          Array.isArray(res.slots) ? res.slots.filter((s) => !s.isBooked) : []
+        );
       }
-    } catch (e) { console.error('Load slots error:', e); }
-    finally { setSlotsLoading(false); }
-  };
-
-  /** Step 3 → Step 4: Select slot → confirm */
-  const handleSelectSlot = (slot) => {
-    setSelectedSlot(slot);
-    setBookingStep(4);
-  };
-
-  /** Step 4: Submit booking → create appointment */
-  const handleConfirmBooking = async () => {
-    if (!selectedDoctor || !selectedSlot || !bookingReason.trim()) {
-      openModal('error', 'خطأ', 'الرجاء إدخال سبب الزيارة');
-      return;
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل المواعيد المتاحة', err?.message || 'حدث خطأ');
+    } finally {
+      setSlotsLoading(false);
     }
-    setBookingSubmitting(true);
+  };
 
+  const handleSubmit = async () => {
+    if (!selectedSlot || !reasonForVisit.trim()) return;
+    setSubmitting(true);
     try {
-      const token = localStorage.getItem('token');
-      const res = await fetch('http://localhost:5000/api/patient/appointments', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${token}` },
-        body: JSON.stringify({
-          appointmentType: 'doctor',
-          doctorId: selectedDoctor._id,
-          slotId: selectedSlot._id,
-          appointmentDate: selectedSlot.date,
-          appointmentTime: selectedSlot.startTime,
-          reasonForVisit: bookingReason,
-          bookingMethod: 'online',
-          priority: 'routine',
-          status: 'scheduled'
-        })
+      const res = await patientAPI.bookAppointment({
+        slotId: selectedSlot._id,
+        appointmentType: 'doctor',
+        reasonForVisit: reasonForVisit.trim(),
+        priority,
       });
-      const data = await res.json();
-
-      if (res.ok && data.success) {
-        openModal('success', 'تم الحجز بنجاح ✅', `تم حجز موعدك مع د. ${selectedDoctor.firstName} ${selectedDoctor.lastName}\nالتاريخ: ${formatDate(selectedSlot.date)}\nالوقت: ${selectedSlot.startTime}`);
-        setBookingStep(0);
-        setBookingSpec('');
-        setSelectedDoctor(null);
-        setSelectedSlot(null);
-        setBookingReason('');
-        // Refresh appointments
-        const aptRes = await fetch('http://localhost:5000/api/patient/appointments', { headers: { 'Authorization': `Bearer ${token}` } });
-        const aptData = await aptRes.json();
-        if (aptRes.ok && aptData.success) setAppointments(aptData.appointments || []);
+      if (res?.success) {
+        onSuccess();
       } else {
-        openModal('error', 'خطأ', data.message || 'حدث خطأ أثناء الحجز');
+        openAlert('error', 'فشل الحجز', res?.message || 'حدث خطأ غير متوقع');
       }
-    } catch (e) {
-      console.error('Booking error:', e);
-      openModal('error', 'خطأ', 'حدث خطأ في الاتصال بالخادم');
-    } finally { setBookingSubmitting(false); }
+    } catch (err) {
+      openAlert('error', 'فشل الحجز', err?.message || 'حدث خطأ في الاتصال');
+    } finally {
+      setSubmitting(false);
+    }
   };
-
-  /** Reset booking wizard */
-  const resetBooking = () => {
-    setBookingStep(0);
-    setBookingSpec('');
-    setBookingDoctors([]);
-    setSelectedDoctor(null);
-    setDoctorSlots([]);
-    setSelectedSlot(null);
-    setBookingReason('');
-  };
-
-  const handleLogout = () => openModal('confirm', 'تأكيد تسجيل الخروج', 'هل أنت متأكد من رغبتك في تسجيل الخروج؟', () => authAPI.logout());
-  
-  const formatDate = (d) => d ? new Date(d).toLocaleDateString('ar-EG', { year: 'numeric', month: 'long', day: 'numeric' }) : '-';
-  
-  const calculateAge = (d) => { 
-    if (!d) return null; 
-    const t = new Date(), b = new Date(d); 
-    let a = t.getFullYear() - b.getFullYear(); 
-    if (t.getMonth() < b.getMonth() || (t.getMonth() === b.getMonth() && t.getDate() < b.getDate())) a--; 
-    return a; 
-  };
-  
-  const calculateBMI = (h, w) => (h && w) ? (w / ((h/100) ** 2)).toFixed(1) : null;
-  
-  const getBMICategory = (b) => !b ? null : b < 18.5 ? 'نقص الوزن' : b < 25 ? 'وزن طبيعي' : b < 30 ? 'وزن زائد' : 'سمنة';
-  
-  const formatDateTime = (date) => {
-    if (!date) return '-';
-    return new Date(date).toLocaleDateString('ar-EG', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit'
-    });
-  };
-
-  const toggleVisitExpansion = (visitId) => {
-    setExpandedVisit(expandedVisit === visitId ? null : visitId);
-  };
-
-  const getBMICategoryClass = (b) => !b ? '' : b < 18.5 ? 'underweight' : b < 25 ? 'normal' : b < 30 ? 'overweight' : 'obese';
-
-  if (loading) return (
-    <div className="loading-container">
-      <div className="loading-spinner"></div>
-      <p>جاري التحميل...</p>
-    </div>
-  );
-  
-  if (!user) return null;
-
-  const age = calculateAge(user.dateOfBirth);
-  const patientData = user.roleData?.patient || {};
-  const bmi = calculateBMI(patientData.height, patientData.weight);
-  const bmiCategory = getBMICategory(bmi);
-  const bmiCategoryClass = getBMICategoryClass(parseFloat(bmi));
 
   return (
-    <div className="patient-dashboard">
-      <Navbar />
-      
-      {/* Modal */}
-      {modal.isOpen && (
-        <div className="modal-overlay" onClick={closeModal}>
-          <div className="modal-container" onClick={e => e.stopPropagation()}>
-            <div className={`modal-header ${modal.type}`}>
-              <div className="modal-icon">{modal.type === 'success' ? '✓' : modal.type === 'error' ? '✕' : '؟'}</div>
-              <h2>{modal.title}</h2>
-            </div>
-            <div className="modal-body"><p>{modal.message}</p></div>
-            <div className="modal-footer">
-              {modal.type === 'confirm' ? (
-                <>
-                  <button className="modal-button secondary" onClick={closeModal}>إلغاء</button>
-                  <button className="modal-button primary" onClick={handleModalConfirm}>تأكيد</button>
-                </>
-              ) : (
-                <button className="modal-button primary" onClick={modal.onConfirm ? handleModalConfirm : closeModal}>حسناً</button>
-              )}
-            </div>
-          </div>
-        </div>
-      )}
+    <>
+      <div className="pd-modal-header pd-modal-header--info">
+        <Plus size={20} aria-hidden="true" />
+        <h3 className="pd-modal-title">حجز موعد جديد</h3>
+        <button type="button" className="pd-modal-close" onClick={onClose} aria-label="إغلاق">
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="pd-modal-body">
+        <ol className="pd-booking-steps" aria-label="خطوات الحجز">
+          <li className={`pd-booking-step${step === 'search' ? ' is-active' : ''}`}>
+            <span>1</span> اختيار الطبيب
+          </li>
+          <li className={`pd-booking-step${step === 'slots' ? ' is-active' : ''}`}>
+            <span>2</span> اختيار الموعد
+          </li>
+          <li className={`pd-booking-step${step === 'confirm' ? ' is-active' : ''}`}>
+            <span>3</span> التأكيد
+          </li>
+        </ol>
 
-      <div className="dashboard-container">
-        {/* Dashboard Tabs */}
-        <div className="dashboard-tabs">
-          {[
-            { id: 'overview', icon: '📊', label: 'نظرة عامة' },
-            { id: 'appointments', icon: '📅', label: 'المواعيد' },
-            { id: 'visits', icon: '📋', label: 'الزيارات' },
-            { id: 'labResults', icon: '🔬', label: 'التحاليل' },
-            { id: 'prescriptions', icon: '📜', label: 'الوصفات' },
-            { id: 'consultation', icon: '🤖', label: 'استشيرني' },
-            { id: 'medications', icon: '💊', label: 'الأدوية' }
-          ].map(tab => (
-            <button 
-              key={tab.id} 
-              className={`tab-btn ${activeSection === tab.id ? 'active' : ''}`} 
-              onClick={() => setActiveSection(tab.id)}
-            >
-              <span className="tab-icon">{tab.icon}</span>
-              {tab.label}
-              {tab.id === 'appointments' && appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length > 0 && (
-                <span className="tab-badge">{appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length}</span>
-              )}
-              {tab.id === 'labResults' && labResults.filter(l => !l.isViewedByPatient && l.status === 'completed').length > 0 && (
-                <span className="tab-badge new">{labResults.filter(l => !l.isViewedByPatient && l.status === 'completed').length}</span>
-              )}
-            </button>
-          ))}
-        </div>
-
-        {/* OVERVIEW SECTION */}
-        {activeSection === 'overview' && (
-          <div className="section-content">
-            {/* Profile Header Card - Combined with Welcome */}
-            <div className="profile-header-card">
-              {/* Logout Button */}
-              <button className="logout-btn-profile" onClick={handleLogout}>
-                <span>🚪</span>
-                <span>تسجيل الخروج</span>
-              </button>
-              
-              <div className="profile-main-content">
-                <div className="profile-avatar">
-                  <div className="avatar-circle"><span>{user.gender === 'male' ? '👨' : '👩'}</span></div>
-                  <div className="avatar-badge"><span>✓</span></div>
-                </div>
-                <div className="profile-header-info">
-                  <p className="welcome-greeting">مرحباً 👋</p>
-                  <h1>{user.firstName} {user.fatherName && `${user.fatherName} `}{user.lastName}</h1>
-                  <p className="profile-role">مريض - Patient 360°</p>
-                  <div className="profile-meta-info">
-                    {age && <div className="meta-item"><span>🎂</span><span>{age} سنة</span></div>}
-                    {user.gender && <div className="meta-item"><span>{user.gender === 'male' ? '♂️' : '♀️'}</span><span>{user.gender === 'male' ? 'ذكر' : 'أنثى'}</span></div>}
-                    {patientData.bloodType && <div className="meta-item"><span>🩸</span><span>{patientData.bloodType}</span></div>}
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            {/* Quick Stats Grid */}
-            <div className="quick-stats-grid">
-              <div className="quick-stat-card visits">
-                <div className="stat-icon-wrapper"><span>📋</span></div>
-                <div className="stat-content">
-                  <h3>{visits.length}</h3>
-                  <p>زيارة طبية</p>
-                </div>
-              </div>
-              <div className="quick-stat-card appointments">
-                <div className="stat-icon-wrapper"><span>📅</span></div>
-                <div className="stat-content">
-                  <h3>{appointments.filter(a => a.status === 'scheduled' || a.status === 'confirmed').length}</h3>
-                  <p>موعد قادم</p>
-                </div>
-              </div>
-              <div className="quick-stat-card labs">
-                <div className="stat-icon-wrapper"><span>🔬</span></div>
-                <div className="stat-content">
-                  <h3>{labResults.length}</h3>
-                  <p>تحليل مخبري</p>
-                </div>
-              </div>
-              {bmi && (
-                <div className={`quick-stat-card bmi ${bmiCategoryClass}`}>
-                  <div className="stat-icon-wrapper"><span>⚖️</span></div>
-                  <div className="stat-content">
-                    <h3>{bmi}</h3>
-                    <p>مؤشر كتلة الجسم</p>
-                    <span className={`stat-badge ${bmiCategoryClass}`}>{bmiCategory}</span>
-                  </div>
-                </div>
-              )}
-            </div>
-
-            {/* BMI Scale Indicator - NEW PROFESSIONAL COMPONENT */}
-            {bmi && (
-              <BMIScaleIndicator 
-                bmi={bmi} 
-                weight={patientData.weight} 
-                height={patientData.height} 
+        {step === 'search' && (
+          <form className="pd-booking-search" onSubmit={handleSearch}>
+            <div className="pd-form-group">
+              <label htmlFor="pd-booking-spec" className="pd-form-label">التخصص</label>
+              <input
+                id="pd-booking-spec"
+                type="text"
+                className="pd-form-input"
+                value={specialization}
+                onChange={(e) => setSpecialization(e.target.value)}
+                placeholder="قلبية، عصبية، جلدية..."
+                dir="auto"
               />
-            )}
-
-            {/* Personal Information Section */}
-            <div className="data-section">
-              <div className="section-header">
-                <div className="section-title-wrapper">
-                  <span className="section-icon">👤</span>
-                  <h2>المعلومات الشخصية</h2>
-                </div>
-              </div>
-              <div className="info-cards-grid">
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle email"><span>✉️</span></div>
-                    <h3>البريد الإلكتروني</h3>
-                  </div>
-                  <p className="card-value" dir="ltr">{user.email}</p>
-                </div>
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle phone"><span>📱</span></div>
-                    <h3>رقم الهاتف</h3>
-                  </div>
-                  <p className="card-value" dir="ltr">{user.phoneNumber || 'غير محدد'}</p>
-                </div>
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle id"><span>🆔</span></div>
-                    <h3>رقم الهوية</h3>
-                  </div>
-                  <p className="card-value">{user.nationalId || 'غير محدد'}</p>
-                </div>
-                <div className="info-display-card">
-                  <div className="card-icon-header">
-                    <div className="icon-circle birth"><span>🎂</span></div>
-                    <h3>تاريخ الميلاد</h3>
-                  </div>
-                  <p className="card-value">{formatDate(user.dateOfBirth)}</p>
-                </div>
-                {user.address && (
-                  <div className="info-display-card full-width">
-                    <div className="card-icon-header">
-                      <div className="icon-circle address"><span>📍</span></div>
-                      <h3>العنوان</h3>
-                    </div>
-                    <p className="card-value">{user.address}</p>
-                  </div>
-                )}
-                {user.governorate && (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle gov"><span>🏛️</span></div>
-                      <h3>المحافظة</h3>
-                    </div>
-                    <p className="card-value">{user.governorate}</p>
-                  </div>
-                )}
-                {user.city && (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle city"><span>🏙️</span></div>
-                      <h3>المدينة</h3>
-                    </div>
-                    <p className="card-value">{user.city}</p>
-                  </div>
-                )}
-                {user.motherName && (
-                  <div className="info-display-card">
-                    <div className="card-icon-header">
-                      <div className="icon-circle mother"><span>👩</span></div>
-                      <h3>اسم الأم</h3>
-                    </div>
-                    <p className="card-value">{user.motherName}</p>
-                  </div>
-                )}
-              </div>
             </div>
-
-            {/* Medical Information Section */}
-            {(patientData.bloodType || patientData.height || patientData.weight || patientData.smokingStatus) && (
-              <div className="data-section">
-                <div className="section-header">
-                  <div className="section-title-wrapper">
-                    <span className="section-icon">🏥</span>
-                    <h2>المعلومات الطبية</h2>
-                  </div>
-                </div>
-                <div className="medical-info-grid">
-                  {patientData.bloodType && (
-                    <div className="medical-card">
-                      <div className="medical-card-header">
-                        <div className="medical-icon">🩸</div>
-                        <h3>فصيلة الدم</h3>
+            <button type="submit" className="pd-btn pd-btn--primary" disabled={doctorsLoading}>
+              <Search size={16} aria-hidden="true" />
+              <span>{doctorsLoading ? '...' : 'بحث'}</span>
+            </button>
+            {!doctorsLoading && doctors.length > 0 && (
+              <ul className="pd-booking-doctors">
+                {doctors.map((d) => (
+                  <li key={d._id}>
+                    <button type="button" className="pd-booking-doctor" onClick={() => handlePickDoctor(d)}>
+                      <Stethoscope size={18} aria-hidden="true" />
+                      <div>
+                        <strong dir="auto">{d.firstName} {d.lastName}</strong>
+                        <span dir="auto">{d.specialization}</span>
                       </div>
-                      <div className="medical-value-large">{patientData.bloodType}</div>
-                      {patientData.rhFactor && patientData.rhFactor !== 'unknown' && (
-                        <div className="medical-unit">Rh: {patientData.rhFactor === 'positive' ? '+' : '-'}</div>
-                      )}
-                    </div>
-                  )}
-                  {patientData.height && (
-                    <div className="medical-card">
-                      <div className="medical-card-header">
-                        <div className="medical-icon">📏</div>
-                        <h3>الطول</h3>
-                      </div>
-                      <div className="medical-value-large">{patientData.height}</div>
-                      <div className="medical-unit">سم</div>
-                    </div>
-                  )}
-                  {patientData.weight && (
-                    <div className="medical-card">
-                      <div className="medical-card-header">
-                        <div className="medical-icon">⚖️</div>
-                        <h3>الوزن</h3>
-                      </div>
-                      <div className="medical-value-large">{patientData.weight}</div>
-                      <div className="medical-unit">كجم</div>
-                    </div>
-                  )}
-                  {patientData.smokingStatus && (
-                    <div className="medical-card">
-                      <div className="medical-card-header">
-                        <div className="medical-icon">🚬</div>
-                        <h3>حالة التدخين</h3>
-                      </div>
-                      <div className="medical-value-large smoking-status">
-                        {patientData.smokingStatus === 'non-smoker' ? '🚫 غير مدخن' :
-                         patientData.smokingStatus === 'former_smoker' ? '✅ مدخن سابق' :
-                         patientData.smokingStatus === 'current_smoker' ? '⚠️ مدخن حالي' : patientData.smokingStatus}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
+                      <ChevronLeft size={16} aria-hidden="true" />
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
+          </form>
+        )}
 
-            {/* Health History Section */}
-            <div className="data-section">
-              <div className="section-header">
-                <div className="section-title-wrapper">
-                  <span className="section-icon">📜</span>
-                  <h2>السجل الصحي</h2>
-                </div>
-              </div>
-              <div className="health-history-grid">
-                <div className="history-card allergies-card">
-                  <div className="history-header">
-                    <div className="history-icon">⚠️</div>
-                    <h3>الحساسية</h3>
-                    <span className="count-badge">{patientData.allergies?.length || 0}</span>
-                  </div>
-                  {patientData.allergies?.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.allergies.map((a, i) => (
-                        <li key={i} className="history-item"><span>•</span><span>{a}</span></li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message"><span>✓</span><p>لا توجد حساسية مسجلة</p></div>
-                  )}
-                </div>
-                <div className="history-card diseases-card">
-                  <div className="history-header">
-                    <div className="history-icon">🏥</div>
-                    <h3>الأمراض المزمنة</h3>
-                    <span className="count-badge">{patientData.chronicDiseases?.length || 0}</span>
-                  </div>
-                  {patientData.chronicDiseases?.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.chronicDiseases.map((d, i) => (
-                        <li key={i} className="history-item"><span>•</span><span>{d}</span></li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message"><span>✓</span><p>لا توجد أمراض مزمنة</p></div>
-                  )}
-                </div>
-                <div className="history-card family-card">
-                  <div className="history-header">
-                    <div className="history-icon">👨‍👩‍👧‍👦</div>
-                    <h3>التاريخ العائلي</h3>
-                    <span className="count-badge">{patientData.familyHistory?.length || 0}</span>
-                  </div>
-                  {patientData.familyHistory?.length > 0 ? (
-                    <ul className="history-list">
-                      {patientData.familyHistory.map((h, i) => (
-                        <li key={i} className="history-item"><span>•</span><span>{h}</span></li>
-                      ))}
-                    </ul>
-                  ) : (
-                    <div className="no-data-message"><span>✓</span><p>لا يوجد تاريخ عائلي مسجل</p></div>
-                  )}
-                </div>
-              </div>
-            </div>
-
-            {/* Emergency Contact Section */}
-            {patientData.emergencyContact && (
-              <div className="data-section">
-                <div className="section-header">
-                  <div className="section-title-wrapper">
-                    <span className="section-icon">🆘</span>
-                    <h2>جهة الاتصال للطوارئ</h2>
-                  </div>
-                </div>
-                <div className="emergency-contact-card">
-                  <div className="emergency-info-grid">
-                    <div className="emergency-item">
-                      <span className="emergency-label">👤 الاسم:</span>
-                      <span className="emergency-value">{patientData.emergencyContact.name}</span>
-                    </div>
-                    <div className="emergency-item">
-                      <span className="emergency-label">👨‍👩‍👦 صلة القرابة:</span>
-                      <span className="emergency-value">{patientData.emergencyContact.relationship}</span>
-                    </div>
-                    <div className="emergency-item">
-                      <span className="emergency-label">📞 رقم الهاتف:</span>
-                      <span className="emergency-value" dir="ltr">{patientData.emergencyContact.phoneNumber}</span>
-                    </div>
-                    {patientData.emergencyContact.alternativePhoneNumber && (
-                      <div className="emergency-item">
-                        <span className="emergency-label">📱 رقم بديل:</span>
-                        <span className="emergency-value" dir="ltr">{patientData.emergencyContact.alternativePhoneNumber}</span>
-                      </div>
-                    )}
-                  </div>
-                </div>
-              </div>
+        {step === 'slots' && (
+          <div className="pd-booking-slots">
+            {slotsLoading ? (
+              <LoadingSpinner message="جاري تحميل المواعيد..." />
+            ) : slots.length === 0 ? (
+              <EmptyState icon={Clock} title="لا توجد مواعيد متاحة" subtitle="جرّب اختيار طبيب آخر." />
+            ) : (
+              <ul className="pd-booking-slot-list">
+                {slots.map((slot) => (
+                  <li key={slot._id}>
+                    <button
+                      type="button"
+                      className="pd-booking-slot"
+                      onClick={() => { setSelectedSlot(slot); setStep('confirm'); }}
+                    >
+                      <Calendar size={16} aria-hidden="true" />
+                      <span dir="ltr">{formatDate(slot.slotDate)}</span>
+                      <span dir="ltr">{slot.startTime} — {slot.endTime}</span>
+                    </button>
+                  </li>
+                ))}
+              </ul>
             )}
-
-            {/* Previous Surgeries — patients.previousSurgeries[] */}
-            {patientData.previousSurgeries && patientData.previousSurgeries.length > 0 && (
-              <div className="data-section">
-                <div className="section-header">
-                  <div className="section-title-wrapper">
-                    <span className="section-icon">🔪</span>
-                    <h2>العمليات الجراحية السابقة</h2>
-                  </div>
-                </div>
-                <div className="surgeries-grid">
-                  {patientData.previousSurgeries.map((surgery, index) => (
-                    <div key={index} className="surgery-card">
-                      <div className="surgery-icon">🏥</div>
-                      <div className="surgery-info">
-                        <h4>{surgery.surgeryName}</h4>
-                        {surgery.surgeryDate && (
-                          <span className="surgery-date">📅 {formatDate(surgery.surgeryDate)}</span>
-                        )}
-                        {surgery.hospital && (
-                          <span className="surgery-hospital">🏨 {surgery.hospital}</span>
-                        )}
-                        {surgery.notes && (
-                          <p className="surgery-notes">{surgery.notes}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            {/* Current Long-term Medications — patients.currentMedications[] */}
-            {patientData.currentMedications && patientData.currentMedications.length > 0 && (
-              <div className="data-section">
-                <div className="section-header">
-                  <div className="section-title-wrapper">
-                    <span className="section-icon">💊</span>
-                    <h2>الأدوية المستمرة</h2>
-                  </div>
-                  <span className="section-count-badge">{patientData.currentMedications.length} دواء</span>
-                </div>
-                <div className="current-meds-list">
-                  {patientData.currentMedications.map((med, index) => (
-                    <div key={index} className="current-med-chip">
-                      <span className="med-chip-icon">💊</span>
-                      <span className="med-chip-name">{med}</span>
-                    </div>
-                  ))}
-                </div>
-              </div>
-            )}
+            <button type="button" className="pd-btn pd-btn--ghost" onClick={() => setStep('search')}>
+              <ChevronRight size={16} aria-hidden="true" />
+              <span>العودة للبحث</span>
+            </button>
           </div>
         )}
 
-        {/* APPOINTMENTS SECTION — appointments collection */}
-        {activeSection === 'appointments' && (
-          <div className="section-content">
-            <div className="page-section-header">
-              <div className="section-header-content">
-                <div className="section-icon-box"><span>📅</span></div>
-                <div><h1>المواعيد الطبية</h1><p>Appointments</p></div>
-              </div>
-              <div className="header-actions">
-                <div className="section-count-badge">{appointments.length} موعد</div>
-                {bookingStep === 0 && (
-                  <button className="book-apt-btn" onClick={() => setBookingStep(1)}>
-                    <span>➕</span> حجز موعد جديد
-                  </button>
-                )}
-              </div>
+        {step === 'confirm' && (
+          <div className="pd-booking-confirm">
+            <div className="pd-booking-summary">
+              <p><strong>الطبيب:</strong> <span dir="auto">{selectedDoctor?.firstName} {selectedDoctor?.lastName}</span></p>
+              <p><strong>التاريخ:</strong> <span dir="ltr">{formatDate(selectedSlot?.slotDate)}</span></p>
+              <p><strong>الوقت:</strong> <span dir="ltr">{selectedSlot?.startTime}</span></p>
             </div>
+            <div className="pd-form-group">
+              <label htmlFor="pd-booking-reason" className="pd-form-label">
+                سبب الزيارة <span aria-hidden="true">*</span>
+              </label>
+              <textarea
+                id="pd-booking-reason"
+                className="pd-form-input"
+                value={reasonForVisit}
+                onChange={(e) => setReasonForVisit(e.target.value)}
+                rows={3}
+                dir="auto"
+                required
+              />
+            </div>
+            <div className="pd-form-group">
+              <label htmlFor="pd-booking-priority" className="pd-form-label">الأولوية</label>
+              <select
+                id="pd-booking-priority"
+                className="pd-form-input"
+                value={priority}
+                onChange={(e) => setPriority(e.target.value)}
+              >
+                <option value="routine">روتيني</option>
+                <option value="urgent">عاجل</option>
+                <option value="emergency">طارئ</option>
+              </select>
+            </div>
+          </div>
+        )}
+      </div>
+      <div className="pd-modal-footer">
+        <button type="button" className="pd-btn pd-btn--ghost" onClick={onClose} disabled={submitting}>
+          إلغاء
+        </button>
+        {step === 'confirm' && (
+          <button
+            type="button"
+            className="pd-btn pd-btn--primary"
+            onClick={handleSubmit}
+            disabled={submitting || !reasonForVisit.trim()}
+          >
+            {submitting ? '...' : 'تأكيد الحجز'}
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
 
-            {/* ══════════════════════════════════════════════════════
-                BOOKING WIZARD — 4 Steps
-                ══════════════════════════════════════════════════════ */}
-            {bookingStep > 0 && (
-              <div className="booking-wizard">
-                {/* Progress Steps */}
-                <div className="booking-progress">
-                  {[
-                    { num: 1, label: 'التخصص' },
-                    { num: 2, label: 'الطبيب' },
-                    { num: 3, label: 'الموعد' },
-                    { num: 4, label: 'التأكيد' }
-                  ].map(s => (
-                    <div key={s.num} className={`progress-step ${bookingStep >= s.num ? 'active' : ''} ${bookingStep === s.num ? 'current' : ''}`}>
-                      <div className="step-circle">{bookingStep > s.num ? '✓' : s.num}</div>
-                      <span className="step-label">{s.label}</span>
-                    </div>
-                  ))}
-                </div>
 
-                <button className="booking-cancel-btn" onClick={resetBooking}>✕ إلغاء الحجز</button>
+const REVIEW_TARGETS = [
+  { key: 'doctorId',     label: 'طبيب',       icon: Stethoscope  },
+  { key: 'dentistId',    label: 'طبيب أسنان', icon: User         },
+  { key: 'laboratoryId', label: 'مختبر',       icon: FlaskConical },
+  { key: 'pharmacyId',   label: 'صيدلية',      icon: Pill         },
+  { key: 'hospitalId',   label: 'مستشفى',      icon: Hospital     },
+];
 
-                {/* ── Step 1: Choose Specialization ────────────── */}
-                {bookingStep === 1 && (
-                  <div className="booking-step-content">
-                    <h2 className="step-title">🏥 اختر التخصص الطبي</h2>
-                    <p className="step-desc">اختر التخصص الذي تريد حجز موعد فيه</p>
-                    <div className="specializations-grid">
-                      {BOOKING_SPECIALIZATIONS.map(spec => (
-                        <button key={spec.id} className="spec-card" onClick={() => handleSelectSpecialization(spec.id)}>
-                          <span className="spec-icon">{spec.icon}</span>
-                          <span className="spec-name">{spec.nameAr}</span>
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                )}
+function ReviewSubmitForm({ onCancel, onConfirm, submitting }) {
+  const [targetType, setTargetType] = useState('doctorId');
+  const [targetId, setTargetId] = useState('');
+  const [rating, setRating] = useState(0);
+  const [reviewText, setReviewText] = useState('');
+  const [isAnonymous, setIsAnonymous] = useState(false);
 
-                {/* ── Step 2: Choose Doctor ─────────────────────── */}
-                {bookingStep === 2 && (
-                  <div className="booking-step-content">
-                    <button className="back-step-btn" onClick={() => setBookingStep(1)}>→ رجوع للتخصصات</button>
-                    <h2 className="step-title">👨‍⚕️ اختر الطبيب</h2>
-                    <p className="step-desc">الأطباء المتاحون في تخصص {BOOKING_SPECIALIZATIONS.find(s => s.id === bookingSpec)?.nameAr}</p>
+  const canSubmit = targetId.trim() && rating >= 1 && rating <= 5;
 
-                    {bookingDoctorsLoading && (
-                      <div className="loading-state"><div className="spinner"></div><p>جاري البحث عن الأطباء...</p></div>
-                    )}
+  const handleSubmit = () => {
+    if (!canSubmit || submitting) return;
+    onConfirm({
+      rating,
+      reviewText: reviewText.trim() || undefined,
+      isAnonymous,
+      [targetType]: targetId.trim(),
+    });
+  };
 
-                    {!bookingDoctorsLoading && bookingDoctors.length === 0 && (
-                      <div className="empty-state-card">
-                        <div className="empty-icon">👨‍⚕️</div>
-                        <h3>لا يوجد أطباء متاحون حالياً</h3>
-                        <p>جرب تخصصاً آخر أو حاول لاحقاً</p>
-                      </div>
-                    )}
+  return (
+    <>
+      <div className="pd-modal-header pd-modal-header--info">
+        <Star size={20} aria-hidden="true" />
+        <h3 className="pd-modal-title">إضافة تقييم جديد</h3>
+        <button type="button" className="pd-modal-close" onClick={onCancel} aria-label="إغلاق">
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="pd-modal-body">
+        <fieldset className="pd-form-group">
+          <legend className="pd-form-label">الجهة المُقَيَّمة</legend>
+          <div className="pd-review-target-row">
+            {REVIEW_TARGETS.map(({ key, label, icon: TIcon }) => (
+              <label
+                key={key}
+                className={`pd-review-target${targetType === key ? ' is-active' : ''}`}
+              >
+                <input
+                  type="radio"
+                  name="reviewTarget"
+                  value={key}
+                  checked={targetType === key}
+                  onChange={(e) => setTargetType(e.target.value)}
+                  disabled={submitting}
+                />
+                <TIcon size={16} aria-hidden="true" />
+                <span>{label}</span>
+              </label>
+            ))}
+          </div>
+        </fieldset>
 
-                    {!bookingDoctorsLoading && bookingDoctors.length > 0 && (
-                      <div className="doctors-list">
-                        {bookingDoctors.map((doc, i) => (
-                          <div key={doc._id || i} className="doctor-card-booking" onClick={() => handleSelectDoctor(doc)}>
-                            <div className="doc-avatar"><span>👨‍⚕️</span></div>
-                            <div className="doc-info">
-                              <h3>د. {doc.firstName} {doc.fatherName && `${doc.fatherName} `}{doc.lastName}</h3>
-                              <div className="doc-meta-grid">
-                                {doc.hospitalAffiliation && (
-                                  <span className="doc-meta-item">🏥 {doc.hospitalAffiliation}</span>
-                                )}
-                                {doc.governorate && (
-                                  <span className="doc-meta-item">📍 {doc.governorate}{doc.city ? ` - ${doc.city}` : ''}</span>
-                                )}
-                                {doc.yearsOfExperience && (
-                                  <span className="doc-meta-item">📅 {doc.yearsOfExperience} سنة خبرة</span>
-                                )}
-                                {doc.consultationFee && (
-                                  <span className="doc-meta-item">💰 {doc.consultationFee?.toLocaleString()} {doc.currency || 'ل.س'}</span>
-                                )}
-                              </div>
-                              {doc.averageRating > 0 && (
-                                <div className="doc-rating">
-                                  <span className="rating-stars">{'⭐'.repeat(Math.round(doc.averageRating))}</span>
-                                  <span className="rating-num">{doc.averageRating.toFixed(1)}</span>
-                                  <span className="rating-count">({doc.totalReviews} تقييم)</span>
-                                </div>
-                              )}
-                            </div>
-                            <div className="doc-select-arrow">←</div>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                )}
+        <div className="pd-form-group">
+          <label htmlFor="pd-review-target-id" className="pd-form-label">
+            معرّف الجهة <span aria-hidden="true">*</span>
+          </label>
+          <input
+            id="pd-review-target-id"
+            type="text"
+            className="pd-form-input"
+            value={targetId}
+            onChange={(e) => setTargetId(e.target.value)}
+            dir="ltr"
+            placeholder="أدخل المعرّف..."
+            required
+            disabled={submitting}
+          />
+          <p className="pd-form-hint">
+            ستتم إضافة اختيار مباشر من قائمة الأطباء/المراكز في إصدار لاحق.
+          </p>
+        </div>
 
-                {/* ── Step 3: Choose Time Slot ──────────────────── */}
-                {bookingStep === 3 && selectedDoctor && (
-                  <div className="booking-step-content">
-                    <button className="back-step-btn" onClick={() => setBookingStep(2)}>→ رجوع للأطباء</button>
-                    <h2 className="step-title">📅 اختر الموعد المتاح</h2>
-                    <div className="selected-doctor-mini">
-                      <span>👨‍⚕️</span>
-                      <span>د. {selectedDoctor.firstName} {selectedDoctor.lastName}</span>
-                      <span className="mini-hospital">🏥 {selectedDoctor.hospitalAffiliation || ''}</span>
-                    </div>
+        <fieldset className="pd-form-group">
+          <legend className="pd-form-label">التقييم</legend>
+          <div
+            className="pd-review-stars"
+            role="radiogroup"
+            aria-label="التقييم بالنجوم"
+          >
+            {[1, 2, 3, 4, 5].map((n) => (
+              <button
+                key={n}
+                type="button"
+                role="radio"
+                aria-checked={rating === n}
+                aria-label={`${n} من 5`}
+                className={`pd-review-star${n <= rating ? ' is-filled' : ''}`}
+                onClick={() => setRating(n)}
+                disabled={submitting}
+              >
+                <Star
+                  size={24}
+                  fill={n <= rating ? 'currentColor' : 'none'}
+                  aria-hidden="true"
+                />
+              </button>
+            ))}
+          </div>
+        </fieldset>
 
-                    {slotsLoading && (
-                      <div className="loading-state"><div className="spinner"></div><p>جاري تحميل المواعيد المتاحة...</p></div>
-                    )}
+        <div className="pd-form-group">
+          <label htmlFor="pd-review-text" className="pd-form-label">
+            تعليق (اختياري)
+          </label>
+          <textarea
+            id="pd-review-text"
+            className="pd-form-input"
+            value={reviewText}
+            onChange={(e) => setReviewText(e.target.value)}
+            maxLength={1000}
+            rows={3}
+            dir="auto"
+            placeholder="شاركنا تجربتك..."
+            disabled={submitting}
+          />
+        </div>
 
-                    {!slotsLoading && doctorSlots.length === 0 && (
-                      <div className="empty-state-card">
-                        <div className="empty-icon">📅</div>
-                        <h3>لا توجد مواعيد متاحة حالياً</h3>
-                        <p>لا يوجد أوقات فارغة لهذا الطبيب، جرب طبيباً آخر</p>
-                      </div>
-                    )}
+        <label className="pd-checkbox">
+          <input
+            type="checkbox"
+            checked={isAnonymous}
+            onChange={(e) => setIsAnonymous(e.target.checked)}
+            disabled={submitting}
+          />
+          <span>إرسال التقييم دون الكشف عن الهوية</span>
+        </label>
+      </div>
+      <div className="pd-modal-footer">
+        <button type="button" className="pd-btn pd-btn--ghost" onClick={onCancel} disabled={submitting}>
+          إلغاء
+        </button>
+        <button
+          type="button"
+          className="pd-btn pd-btn--primary"
+          onClick={handleSubmit}
+          disabled={!canSubmit || submitting}
+        >
+          {submitting ? '...' : 'إرسال التقييم'}
+        </button>
+      </div>
+    </>
+  );
+}
 
-                    {!slotsLoading && doctorSlots.length > 0 && (
-                      <div className="slots-grid">
-                        {doctorSlots.map((slot, i) => {
-                          const isFull = slot.currentBookings >= slot.maxBookings;
-                          const remaining = slot.maxBookings - (slot.currentBookings || 0);
-                          return (
-                            <button key={slot._id || i}
-                              className={`slot-card ${selectedSlot?._id === slot._id ? 'selected' : ''} ${isFull ? 'full' : ''}`}
-                              onClick={() => !isFull && handleSelectSlot(slot)}
-                              disabled={isFull}>
-                              <div className="slot-date">
-                                <span className="slot-day-num">{slot.date ? new Date(slot.date).getDate() : '--'}</span>
-                                <span className="slot-month">{slot.date ? new Date(slot.date).toLocaleDateString('ar-EG', { month: 'short', weekday: 'short' }) : ''}</span>
-                              </div>
-                              <div className="slot-time">
-                                <span className="time-range">{slot.startTime} — {slot.endTime}</span>
-                                {slot.slotDuration && <span className="slot-duration">{slot.slotDuration} دقيقة</span>}
-                              </div>
-                              <div className={`slot-availability ${isFull ? 'full' : remaining <= 2 ? 'limited' : 'open'}`}>
-                                {isFull ? '🔴 مكتمل' : remaining <= 2 ? `🟡 ${remaining} أماكن فقط` : `🟢 ${remaining} أماكن متاحة`}
-                              </div>
-                            </button>
-                          );
-                        })}
-                      </div>
-                    )}
-                  </div>
-                )}
 
-                {/* ── Step 4: Confirm Booking ───────────────────── */}
-                {bookingStep === 4 && selectedDoctor && selectedSlot && (
-                  <div className="booking-step-content">
-                    <button className="back-step-btn" onClick={() => setBookingStep(3)}>→ رجوع للمواعيد</button>
-                    <h2 className="step-title">✅ تأكيد الحجز</h2>
+function ProfileEditForm({ profile, onCancel, onConfirm, submitting }) {
+  const ident   = profile?.person || profile?.child || {};
+  const patient = profile?.patient || {};
+  const ec      = patient?.emergencyContact || {};
 
-                    <div className="booking-summary">
-                      <div className="summary-row">
-                        <span className="summary-label">👨‍⚕️ الطبيب:</span>
-                        <span className="summary-value">د. {selectedDoctor.firstName} {selectedDoctor.fatherName && `${selectedDoctor.fatherName} `}{selectedDoctor.lastName}</span>
-                      </div>
-                      <div className="summary-row">
-                        <span className="summary-label">🏥 المشفى:</span>
-                        <span className="summary-value">{selectedDoctor.hospitalAffiliation || '-'}</span>
-                      </div>
-                      <div className="summary-row">
-                        <span className="summary-label">📅 التاريخ:</span>
-                        <span className="summary-value">{formatDate(selectedSlot.date)}</span>
-                      </div>
-                      <div className="summary-row">
-                        <span className="summary-label">🕐 الوقت:</span>
-                        <span className="summary-value" dir="ltr">{selectedSlot.startTime} — {selectedSlot.endTime}</span>
-                      </div>
-                      {selectedDoctor.consultationFee && (
-                        <div className="summary-row">
-                          <span className="summary-label">💰 رسوم الكشف:</span>
-                          <span className="summary-value">{selectedDoctor.consultationFee?.toLocaleString()} {selectedDoctor.currency || 'ل.س'}</span>
-                        </div>
-                      )}
-                    </div>
+  const [form, setForm] = useState({
+    phoneNumber:            ident.phoneNumber || '',
+    alternativePhoneNumber: ident.alternativePhoneNumber || '',
+    address:                ident.address || '',
+    governorate:            ident.governorate || '',
+    city:                   ident.city || '',
+    bloodType:              patient.bloodType || '',
+    height:                 patient.height || '',
+    weight:                 patient.weight || '',
+    smokingStatus:          patient.smokingStatus || 'non-smoker',
+    allergies:              (patient.allergies || []).join('، '),
+    chronicDiseases:        (patient.chronicDiseases || []).join('، '),
+    ecName:                 ec.name || '',
+    ecRelationship:         ec.relationship || '',
+    ecPhone:                ec.phoneNumber || '',
+  });
 
-                    <div className="booking-reason-section">
-                      <label>📝 سبب الزيارة <span className="required">*</span></label>
-                      <textarea
-                        placeholder="مثال: فحص دوري، ألم في الصدر، متابعة..."
-                        value={bookingReason}
-                        onChange={e => setBookingReason(e.target.value)}
-                        className="booking-textarea"
-                        rows={3}
-                      />
-                    </div>
+  const bind = (field) => ({
+    value: form[field],
+    onChange: (e) => setForm((p) => ({ ...p, [field]: e.target.value })),
+    disabled: submitting,
+  });
 
-                    <button className="confirm-booking-btn" onClick={handleConfirmBooking}
-                      disabled={bookingSubmitting || !bookingReason.trim()}>
-                      {bookingSubmitting ? <><span className="btn-spinner"></span> جاري الحجز...</> :
-                        <><span>✅</span> تأكيد حجز الموعد</>}
-                    </button>
-                  </div>
-                )}
-              </div>
+  const parseTagList = (s) =>
+    s
+      .split(/[،,]/)
+      .map((t) => t.trim())
+      .filter(Boolean);
+
+  const handleSubmit = () => {
+    onConfirm({
+      phoneNumber:            form.phoneNumber,
+      alternativePhoneNumber: form.alternativePhoneNumber || undefined,
+      address:                form.address,
+      governorate:            form.governorate,
+      city:                   form.city,
+      bloodType:              form.bloodType || undefined,
+      height:                 form.height ? Number(form.height) : undefined,
+      weight:                 form.weight ? Number(form.weight) : undefined,
+      smokingStatus:          form.smokingStatus,
+      allergies:              parseTagList(form.allergies),
+      chronicDiseases:        parseTagList(form.chronicDiseases),
+      emergencyContact:
+        form.ecName && form.ecRelationship && form.ecPhone
+          ? {
+              name: form.ecName,
+              relationship: form.ecRelationship,
+              phoneNumber: form.ecPhone,
+            }
+          : undefined,
+    });
+  };
+
+  const GOVS = [
+    'damascus', 'aleppo', 'homs', 'hama', 'latakia', 'tartus',
+    'idlib', 'deir_ez_zor', 'raqqa', 'hasakah', 'daraa',
+    'as_suwayda', 'quneitra', 'rif_dimashq',
+  ];
+  const GOV_LABELS = {
+    damascus: 'دمشق', aleppo: 'حلب', homs: 'حمص', hama: 'حماة',
+    latakia: 'اللاذقية', tartus: 'طرطوس', idlib: 'إدلب',
+    deir_ez_zor: 'دير الزور', raqqa: 'الرقة', hasakah: 'الحسكة',
+    daraa: 'درعا', as_suwayda: 'السويداء', quneitra: 'القنيطرة',
+    rif_dimashq: 'ريف دمشق',
+  };
+
+  return (
+    <>
+      <div className="pd-modal-header pd-modal-header--info">
+        <Edit size={20} aria-hidden="true" />
+        <h3 className="pd-modal-title">تعديل الملف الشخصي</h3>
+        <button type="button" className="pd-modal-close" onClick={onCancel} aria-label="إغلاق">
+          <X size={18} aria-hidden="true" />
+        </button>
+      </div>
+      <div className="pd-modal-body">
+        <h4 className="pd-profile-edit-section-title">معلومات التواصل</h4>
+        <div className="pd-form-row">
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-phone" className="pd-form-label">رقم الهاتف</label>
+            <input id="pd-edit-phone" type="tel" className="pd-form-input" dir="ltr" {...bind('phoneNumber')} />
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-phone-alt" className="pd-form-label">رقم بديل (اختياري)</label>
+            <input id="pd-edit-phone-alt" type="tel" className="pd-form-input" dir="ltr" {...bind('alternativePhoneNumber')} />
+          </div>
+        </div>
+
+        <div className="pd-form-group">
+          <label htmlFor="pd-edit-address" className="pd-form-label">العنوان</label>
+          <input id="pd-edit-address" type="text" className="pd-form-input" dir="auto" {...bind('address')} />
+        </div>
+
+        <div className="pd-form-row">
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-governorate" className="pd-form-label">المحافظة</label>
+            <select id="pd-edit-governorate" className="pd-form-input" {...bind('governorate')}>
+              <option value="">اختر المحافظة</option>
+              {GOVS.map((g) => (
+                <option key={g} value={g}>{GOV_LABELS[g] || g}</option>
+              ))}
+            </select>
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-city" className="pd-form-label">المدينة</label>
+            <input id="pd-edit-city" type="text" className="pd-form-input" dir="auto" {...bind('city')} />
+          </div>
+        </div>
+
+        <h4 className="pd-profile-edit-section-title">المعلومات الطبية</h4>
+        <div className="pd-form-row">
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-blood" className="pd-form-label">فصيلة الدم</label>
+            <select id="pd-edit-blood" className="pd-form-input" {...bind('bloodType')}>
+              <option value="">—</option>
+              {['A+', 'A-', 'B+', 'B-', 'AB+', 'AB-', 'O+', 'O-', 'unknown'].map((b) => (
+                <option key={b} value={b}>{b === 'unknown' ? 'غير معروفة' : b}</option>
+              ))}
+            </select>
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-height" className="pd-form-label">الطول (سم)</label>
+            <input id="pd-edit-height" type="number" min="0" max="300" className="pd-form-input" dir="ltr" {...bind('height')} />
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-weight" className="pd-form-label">الوزن (كغ)</label>
+            <input id="pd-edit-weight" type="number" min="0" max="500" className="pd-form-input" dir="ltr" {...bind('weight')} />
+          </div>
+        </div>
+
+        <div className="pd-form-group">
+          <label htmlFor="pd-edit-smoking" className="pd-form-label">التدخين</label>
+          <select id="pd-edit-smoking" className="pd-form-input" {...bind('smokingStatus')}>
+            <option value="non-smoker">غير مدخن</option>
+            <option value="current_smoker">مدخن حالياً</option>
+            <option value="former_smoker">مدخن سابقاً</option>
+          </select>
+        </div>
+
+        <div className="pd-form-group">
+          <label htmlFor="pd-edit-allergies" className="pd-form-label">الحساسية (افصل بفواصل)</label>
+          <input id="pd-edit-allergies" type="text" className="pd-form-input" dir="auto" placeholder="مثال: بنسلين، فول سوداني" {...bind('allergies')} />
+        </div>
+
+        <div className="pd-form-group">
+          <label htmlFor="pd-edit-chronic" className="pd-form-label">الأمراض المزمنة (افصل بفواصل)</label>
+          <input id="pd-edit-chronic" type="text" className="pd-form-input" dir="auto" placeholder="مثال: ضغط الدم، السكري" {...bind('chronicDiseases')} />
+        </div>
+
+        <h4 className="pd-profile-edit-section-title">جهة الاتصال في حالة الطوارئ</h4>
+        <div className="pd-form-row">
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-ec-name" className="pd-form-label">الاسم</label>
+            <input id="pd-edit-ec-name" type="text" className="pd-form-input" dir="auto" {...bind('ecName')} />
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-ec-rel" className="pd-form-label">صلة القرابة</label>
+            <input id="pd-edit-ec-rel" type="text" className="pd-form-input" dir="auto" {...bind('ecRelationship')} />
+          </div>
+          <div className="pd-form-group">
+            <label htmlFor="pd-edit-ec-phone" className="pd-form-label">الهاتف</label>
+            <input id="pd-edit-ec-phone" type="tel" className="pd-form-input" dir="ltr" {...bind('ecPhone')} />
+          </div>
+        </div>
+      </div>
+      <div className="pd-modal-footer">
+        <button type="button" className="pd-btn pd-btn--ghost" onClick={onCancel} disabled={submitting}>إلغاء</button>
+        <button type="button" className="pd-btn pd-btn--primary" onClick={handleSubmit} disabled={submitting}>
+          {submitting ? '...' : 'حفظ التعديلات'}
+        </button>
+      </div>
+    </>
+  );
+}
+
+
+// ══════════════════════════════════════════════════════════════════════
+// Main component
+// ══════════════════════════════════════════════════════════════════════
+
+export default function PatientDashboard() {
+  const navigate = useNavigate();
+
+  // ── Layout state ────────────────────────────────────────────────────
+  const [activeSection, setActiveSection] = useState('home');
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+
+  // ── Profile + overview (loaded on mount, in parallel) ───────────────
+  const [profile, setProfile] = useState(null);
+  const [profileLoading, setProfileLoading] = useState(true);
+  const [overview, setOverview] = useState(null);
+  const [overviewLoading, setOverviewLoading] = useState(true);
+
+  // ── Per-section lazy-loaded data + section-local UI state ───────────
+  const [appointments, setAppointments] = useState([]);
+  const [appointmentsLoading, setAppointmentsLoading] = useState(false);
+  const [appointmentsLoaded, setAppointmentsLoaded] = useState(false);
+  const [appointmentTab, setAppointmentTab] = useState('upcoming');
+
+  const [visits, setVisits] = useState([]);
+  const [visitsLoading, setVisitsLoading] = useState(false);
+  const [visitsLoaded, setVisitsLoaded] = useState(false);
+  const [expandedVisits, setExpandedVisits] = useState(() => new Set());
+
+  const [prescriptions, setPrescriptions] = useState([]);
+  const [prescriptionsLoading, setPrescriptionsLoading] = useState(false);
+  const [prescriptionsLoaded, setPrescriptionsLoaded] = useState(false);
+  const [prescriptionTab, setPrescriptionTab] = useState('active');
+  const [expandedPrescriptions, setExpandedPrescriptions] = useState(() => new Set());
+
+  const [labTests, setLabTests] = useState([]);
+  const [labTestsLoading, setLabTestsLoading] = useState(false);
+  const [labTestsLoaded, setLabTestsLoaded] = useState(false);
+  const [labTestTab, setLabTestTab] = useState('results');
+  const [expandedLabTests, setExpandedLabTests] = useState(() => new Set());
+
+  const [notifications, setNotifications] = useState([]);
+  const [notificationsLoading, setNotificationsLoading] = useState(false);
+  const [notificationsLoaded, setNotificationsLoaded] = useState(false);
+  const [notificationFilter, setNotificationFilter] = useState('unread');
+
+  const [reviews, setReviews] = useState([]);
+  const [reviewsLoading, setReviewsLoading] = useState(false);
+  const [reviewsLoaded, setReviewsLoaded] = useState(false);
+
+  const [emergencyReports, setEmergencyReports] = useState([]);
+  const [emergencyReportsLoading, setEmergencyReportsLoading] = useState(false);
+  const [emergencyReportsLoaded, setEmergencyReportsLoaded] = useState(false);
+
+  // ── AI assistant state ──────────────────────────────────────────────
+  const [aiActiveTab, setAiActiveTab] = useState('specialist');
+
+  const [specialistInput, setSpecialistInput] = useState('');
+  const [specialistResult, setSpecialistResult] = useState(null);
+  const [specialistLoading, setSpecialistLoading] = useState(false);
+  const [specialistError, setSpecialistError] = useState(null);
+
+  const [triageMode, setTriageMode] = useState('text');
+  const [triageText, setTriageText] = useState('');
+  const [triageImageFile, setTriageImageFile] = useState(null);
+  const [triageResult, setTriageResult] = useState(null);
+  const [triageLoading, setTriageLoading] = useState(false);
+  const [triageError, setTriageError] = useState(null);
+
+  // ── Modal state ─────────────────────────────────────────────────────
+  const [modal, setModal] = useState({
+    isOpen: false,
+    type: 'alert',
+    variant: 'info',
+    title: '',
+    message: '',
+    content: null,
+    onConfirm: null,
+    confirmLabel: 'حسناً',
+    cancelLabel: 'إلغاء',
+    size: 'md',
+  });
+
+  // ── Initial mount: load profile + overview in parallel ──────────────
+  useEffect(() => {
+    let cancelled = false;
+
+    (async () => {
+      const [profileRes, overviewRes] = await Promise.allSettled([
+        patientAPI.getMyProfile(),
+        patientAPI.getDashboardOverview(),
+      ]);
+
+      if (cancelled) return;
+
+      if (profileRes.status === 'fulfilled' && profileRes.value?.success) {
+        setProfile(profileRes.value);
+      }
+      setProfileLoading(false);
+
+      if (overviewRes.status === 'fulfilled' && overviewRes.value?.success) {
+        setOverview(overviewRes.value);
+      }
+      setOverviewLoading(false);
+    })();
+
+    return () => { cancelled = true; };
+  }, []);
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Modal helpers
+  // ════════════════════════════════════════════════════════════════════
+
+  const closeModal = useCallback(() => {
+    setModal((prev) => ({ ...prev, isOpen: false }));
+  }, []);
+
+  const openAlert = useCallback((variant, title, message) => {
+    setModal({
+      isOpen: true,
+      type: 'alert',
+      variant,
+      title,
+      message,
+      content: null,
+      onConfirm: null,
+      confirmLabel: 'حسناً',
+      cancelLabel: 'إلغاء',
+      size: 'md',
+    });
+  }, []);
+
+  const openConfirm = useCallback(
+    (variant, title, message, onConfirm, confirmLabel = 'تأكيد') => {
+      setModal({
+        isOpen: true,
+        type: 'confirm',
+        variant,
+        title,
+        message,
+        content: null,
+        onConfirm,
+        confirmLabel,
+        cancelLabel: 'إلغاء',
+        size: 'md',
+      });
+    },
+    []
+  );
+
+  const openCustomModal = useCallback((title, content, size = 'md') => {
+    setModal({
+      isOpen: true,
+      type: 'custom',
+      variant: 'info',
+      title,
+      message: '',
+      content,
+      onConfirm: null,
+      confirmLabel: 'حسناً',
+      cancelLabel: 'إلغاء',
+      size,
+    });
+  }, []);
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Per-section lazy loaders
+  // ════════════════════════════════════════════════════════════════════
+
+  const loadAppointments = useCallback(async (force = false) => {
+    if (appointmentsLoaded && !force) return;
+    setAppointmentsLoading(true);
+    try {
+      const res = await patientAPI.getAppointments();
+      if (res?.success) {
+        setAppointments(Array.isArray(res.appointments) ? res.appointments : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل المواعيد', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setAppointmentsLoading(false);
+      setAppointmentsLoaded(true);
+    }
+  }, [appointmentsLoaded, openAlert]);
+
+  const loadVisits = useCallback(async (force = false) => {
+    if (visitsLoaded && !force) return;
+    setVisitsLoading(true);
+    try {
+      const res = await patientAPI.getVisits();
+      if (res?.success) {
+        setVisits(Array.isArray(res.visits) ? res.visits : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل الزيارات', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setVisitsLoading(false);
+      setVisitsLoaded(true);
+    }
+  }, [visitsLoaded, openAlert]);
+
+  const loadPrescriptions = useCallback(async (force = false) => {
+    if (prescriptionsLoaded && !force) return;
+    setPrescriptionsLoading(true);
+    try {
+      const res = await patientAPI.getPrescriptions();
+      if (res?.success) {
+        setPrescriptions(Array.isArray(res.prescriptions) ? res.prescriptions : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل الوصفات', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setPrescriptionsLoading(false);
+      setPrescriptionsLoaded(true);
+    }
+  }, [prescriptionsLoaded, openAlert]);
+
+  const loadLabTests = useCallback(async (force = false) => {
+    if (labTestsLoaded && !force) return;
+    setLabTestsLoading(true);
+    try {
+      const res = await patientAPI.getLabTests();
+      if (res?.success) {
+        setLabTests(Array.isArray(res.labTests) ? res.labTests : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل نتائج المختبر', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setLabTestsLoading(false);
+      setLabTestsLoaded(true);
+    }
+  }, [labTestsLoaded, openAlert]);
+
+  const loadNotifications = useCallback(async (force = false) => {
+    if (notificationsLoaded && !force) return;
+    setNotificationsLoading(true);
+    try {
+      const res = await patientAPI.getNotifications();
+      if (res?.success) {
+        setNotifications(Array.isArray(res.notifications) ? res.notifications : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل الإشعارات', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setNotificationsLoading(false);
+      setNotificationsLoaded(true);
+    }
+  }, [notificationsLoaded, openAlert]);
+
+  const loadReviews = useCallback(async (force = false) => {
+    if (reviewsLoaded && !force) return;
+    setReviewsLoading(true);
+    try {
+      const res = await patientAPI.getMyReviews();
+      if (res?.success) {
+        setReviews(Array.isArray(res.reviews) ? res.reviews : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل التقييمات', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setReviewsLoading(false);
+      setReviewsLoaded(true);
+    }
+  }, [reviewsLoaded, openAlert]);
+
+  const loadEmergencyReports = useCallback(async (force = false) => {
+    if (emergencyReportsLoaded && !force) return;
+    setEmergencyReportsLoading(true);
+    try {
+      const res = await patientAPI.getEmergencyReports();
+      if (res?.success) {
+        setEmergencyReports(Array.isArray(res.reports) ? res.reports : []);
+      }
+    } catch (err) {
+      openAlert('error', 'تعذر تحميل السجل', err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setEmergencyReportsLoading(false);
+      setEmergencyReportsLoaded(true);
+    }
+  }, [emergencyReportsLoaded, openAlert]);
+
+  useEffect(() => {
+    switch (activeSection) {
+      case 'appointments':   loadAppointments(); break;
+      case 'visits':         loadVisits(); break;
+      case 'prescriptions':  loadPrescriptions(); break;
+      case 'lab-results':    loadLabTests(); break;
+      case 'notifications':  loadNotifications(); break;
+      case 'reviews':        loadReviews(); break;
+      case 'ai-assistant':   loadEmergencyReports(); break;
+      default: break;
+    }
+  }, [
+    activeSection,
+    loadAppointments,
+    loadVisits,
+    loadPrescriptions,
+    loadLabTests,
+    loadNotifications,
+    loadReviews,
+    loadEmergencyReports,
+  ]);
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Auth / navigation
+  // ════════════════════════════════════════════════════════════════════
+
+  const handleLogout = useCallback(() => {
+    openConfirm(
+      'warning',
+      'تسجيل الخروج',
+      'هل أنت متأكد من رغبتك في تسجيل الخروج؟',
+      () => {
+        authAPI.logout();
+        navigate('/');
+      },
+      'تسجيل الخروج'
+    );
+  }, [navigate, openConfirm]);
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Derived display data
+  // ════════════════════════════════════════════════════════════════════
+
+  const identity = useMemo(() => {
+    if (!profile) return null;
+    return profile.person || profile.child || null;
+  }, [profile]);
+
+  const fullName = useMemo(() => buildFullName(identity), [identity]);
+  const age = useMemo(() => formatAge(identity?.dateOfBirth), [identity]);
+  const isMinor = !!profile?.isMinor;
+
+  const medicalCardNumber = profile?.patient?.medicalCardNumber || null;
+  const bloodType = profile?.patient?.bloodType || null;
+
+  const profileInitial = useMemo(() => {
+    const first = identity?.firstName || '';
+    return first.charAt(0) || 'م';
+  }, [identity]);
+
+  const unreadNotificationsCount = overview?.unreadNotifications ?? 0;
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Sidebar
+  // ════════════════════════════════════════════════════════════════════
+
+  const renderSidebar = () => (
+    <>
+      <div
+        className={`pd-sidebar-backdrop${sidebarOpen ? ' is-open' : ''}`}
+        onClick={() => setSidebarOpen(false)}
+        aria-hidden="true"
+      />
+
+      <aside
+        className={`pd-sidebar${sidebarOpen ? ' is-open' : ''}`}
+        aria-label="القائمة الجانبية"
+      >
+        <button
+          type="button"
+          className="pd-sidebar-close"
+          onClick={() => setSidebarOpen(false)}
+          aria-label="إغلاق القائمة"
+        >
+          <X size={20} aria-hidden="true" />
+        </button>
+
+        <div className="pd-sidebar-brand">
+          <div className="pd-sidebar-brand-logo" aria-hidden="true">
+            <HeartPulse size={24} />
+          </div>
+          <div className="pd-sidebar-brand-text">
+            <h2 className="pd-sidebar-brand-title">مريض 360°</h2>
+            <p className="pd-sidebar-brand-subtitle">لوحة المريض</p>
+          </div>
+        </div>
+
+        <div className="pd-sidebar-user">
+          <div className="pd-sidebar-user-avatar" aria-hidden="true">
+            {identity?.profilePhoto?.url ? (
+              <img
+                src={identity.profilePhoto.url}
+                alt=""
+                className="pd-sidebar-user-avatar-img"
+              />
+            ) : (
+              <span>{profileInitial}</span>
             )}
-
-            {/* ══════════════════════════════════════════════════════
-                EXISTING APPOINTMENTS (unchanged)
-                ══════════════════════════════════════════════════════ */}
-            {bookingStep === 0 && loadingAppointments && (
-              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل المواعيد...</p></div>
-            )}
-
-            {bookingStep === 0 && !loadingAppointments && appointments.length === 0 && (
-              <div className="empty-state-card">
-                <div className="empty-icon">📅</div>
-                <h3>لا توجد مواعيد</h3>
-                <p>اضغط على "حجز موعد جديد" لحجز أول موعد لك</p>
-              </div>
-            )}
-
-            {bookingStep === 0 && !loadingAppointments && appointments.length > 0 && (
+          </div>
+          <div className="pd-sidebar-user-info">
+            {profileLoading ? (
+              <span
+                className="pd-sidebar-user-name-placeholder"
+                aria-hidden="true"
+              >
+                …
+              </span>
+            ) : (
               <>
-                {/* Upcoming Appointments */}
-                {appointments.filter(a => ['scheduled', 'confirmed'].includes(a.status)).length > 0 && (
-                  <div className="appointments-section-group">
-                    <h3 className="group-title"><span>🟢</span> المواعيد القادمة</h3>
-                    <div className="appointments-grid">
-                      {appointments.filter(a => ['scheduled', 'confirmed'].includes(a.status)).map((apt, i) => (
-                        <div key={apt._id || i} className={`appointment-card upcoming ${apt.priority === 'urgent' ? 'urgent' : ''}`}>
-                          <div className="apt-card-accent"></div>
-                          <div className="apt-card-body">
-                            <div className="apt-date-block">
-                              <span className="apt-day">{apt.appointmentDate ? new Date(apt.appointmentDate).getDate() : '--'}</span>
-                              <span className="apt-month">{apt.appointmentDate ? new Date(apt.appointmentDate).toLocaleDateString('ar-EG', { month: 'short' }) : ''}</span>
-                            </div>
-                            <div className="apt-info">
-                              <div className="apt-type-badge">
-                                {apt.appointmentType === 'doctor' ? '🩺 طبيب' :
-                                 apt.appointmentType === 'dentist' ? '🦷 أسنان' :
-                                 apt.appointmentType === 'lab_test' ? '🔬 تحليل' :
-                                 apt.appointmentType === 'follow_up' ? '🔄 متابعة' : '🚑 طوارئ'}
-                              </div>
-                              <h4>{apt.reasonForVisit || 'موعد طبي'}</h4>
-                              <div className="apt-meta">
-                                {apt.appointmentTime && <span>🕐 {apt.appointmentTime}</span>}
-                                {apt.doctorId?.firstName && <span>👨‍⚕️ د. {apt.doctorId.firstName} {apt.doctorId.lastName}</span>}
-                              </div>
-                            </div>
-                            <div className={`apt-status-badge ${apt.status}`}>
-                              {apt.status === 'scheduled' ? 'محجوز' : 'مؤكد'}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                <h3 className="pd-sidebar-user-name" dir="auto">
+                  {fullName || 'مريض'}
+                </h3>
+                {medicalCardNumber && (
+                  <p className="pd-sidebar-user-card" dir="ltr">
+                    <CreditCard size={12} aria-hidden="true" />
+                    <span>{medicalCardNumber}</span>
+                  </p>
                 )}
-
-                {/* Past Appointments */}
-                {appointments.filter(a => ['completed', 'cancelled', 'no_show'].includes(a.status)).length > 0 && (
-                  <div className="appointments-section-group">
-                    <h3 className="group-title"><span>📜</span> المواعيد السابقة</h3>
-                    <div className="appointments-grid past">
-                      {appointments.filter(a => ['completed', 'cancelled', 'no_show'].includes(a.status)).map((apt, i) => (
-                        <div key={apt._id || i} className={`appointment-card past ${apt.status}`}>
-                          <div className="apt-card-body">
-                            <div className="apt-date-block small">
-                              <span className="apt-day">{apt.appointmentDate ? new Date(apt.appointmentDate).getDate() : '--'}</span>
-                              <span className="apt-month">{apt.appointmentDate ? new Date(apt.appointmentDate).toLocaleDateString('ar-EG', { month: 'short', year: 'numeric' }) : ''}</span>
-                            </div>
-                            <div className="apt-info">
-                              <h4>{apt.reasonForVisit || 'موعد طبي'}</h4>
-                              {apt.doctorId?.firstName && <span className="apt-doctor">👨‍⚕️ د. {apt.doctorId.firstName}</span>}
-                            </div>
-                            <div className={`apt-status-badge ${apt.status}`}>
-                              {apt.status === 'completed' ? '✅ مكتمل' : apt.status === 'cancelled' ? '❌ ملغي' : '⚠️ لم يحضر'}
-                            </div>
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
+                {isMinor && (
+                  <span className="pd-sidebar-user-badge pd-sidebar-user-badge--minor">
+                    <Baby size={12} aria-hidden="true" />
+                    <span>قاصر</span>
+                  </span>
                 )}
               </>
             )}
           </div>
-        )}
+        </div>
 
-        {/* LAB RESULTS SECTION — lab_tests collection */}
-        {activeSection === 'labResults' && (
-          <div className="section-content">
-            <div className="page-section-header">
-              <div className="section-header-content">
-                <div className="section-icon-box"><span>🔬</span></div>
-                <div><h1>نتائج التحاليل المخبرية</h1><p>Laboratory Results</p></div>
-              </div>
-              <div className="section-count-badge">{labResults.length} تحليل</div>
-            </div>
+        <nav className="pd-sidebar-nav" aria-label="أقسام اللوحة">
+          {SIDEBAR_GROUPS.map((group) => (
+            <div key={group.label} className="pd-sidebar-group">
+              <div className="pd-sidebar-group-label">{group.label}</div>
+              <ul className="pd-sidebar-group-items">
+                {group.items.map((item) => {
+                  const Icon = item.icon;
+                  const isActive = item.key === activeSection;
+                  const showUnreadBadge =
+                    item.key === 'notifications' && unreadNotificationsCount > 0;
 
-            {loadingLabResults && (
-              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل التحاليل...</p></div>
-            )}
-
-            {!loadingLabResults && labResults.length === 0 && (
-              <div className="empty-state-card">
-                <div className="empty-icon">🔬</div>
-                <h3>لا توجد تحاليل مخبرية</h3>
-                <p>سيتم عرض نتائج تحاليلك هنا بعد إجرائها</p>
-              </div>
-            )}
-
-            {!loadingLabResults && labResults.length > 0 && (
-              <div className="lab-results-list">
-                {labResults.map((lab, i) => (
-                  <div key={lab._id || i} className={`lab-result-card ${lab.isCritical ? 'critical' : ''} ${!lab.isViewedByPatient && lab.status === 'completed' ? 'unread' : ''}`}>
-                    <div className="lab-card-header">
-                      <div className="lab-header-info">
-                        <div className="lab-number">
-                          <span className="lab-icon">{lab.isCritical ? '🔴' : '🔬'}</span>
-                          <span>{lab.testNumber}</span>
-                          {!lab.isViewedByPatient && lab.status === 'completed' && <span className="new-badge">جديد</span>}
-                        </div>
-                        <span className="lab-date">📅 {formatDate(lab.orderDate)}</span>
-                      </div>
-                      <div className={`lab-status-badge ${lab.status}`}>
-                        {lab.status === 'ordered' ? '📝 مطلوب' :
-                         lab.status === 'scheduled' ? '📅 محجوز' :
-                         lab.status === 'sample_collected' ? '🧪 تم أخذ العينة' :
-                         lab.status === 'in_progress' ? '⏳ قيد التحليل' :
-                         lab.status === 'completed' ? '✅ مكتمل' :
-                         lab.status === 'cancelled' ? '❌ ملغي' : lab.status}
-                      </div>
-                    </div>
-
-                    {/* Tests Ordered */}
-                    {lab.testsOrdered && lab.testsOrdered.length > 0 && (
-                      <div className="lab-tests-ordered">
-                        <span className="tests-label">التحاليل المطلوبة:</span>
-                        <div className="tests-chips">
-                          {lab.testsOrdered.map((test, j) => (
-                            <span key={j} className="test-chip">{test.testName}</span>
-                          ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Test Results */}
-                    {lab.status === 'completed' && lab.testResults && lab.testResults.length > 0 && (
-                      <div className="lab-results-table">
-                        <div className="results-table-header">
-                          <span>التحليل</span><span>النتيجة</span><span>الوحدة</span><span>المرجع</span><span>الحالة</span>
-                        </div>
-                        {lab.testResults.map((result, j) => (
-                          <div key={j} className={`results-table-row ${result.isAbnormal ? 'abnormal' : ''} ${result.isCritical ? 'critical' : ''}`}>
-                            <span className="result-name">{result.testName}</span>
-                            <span className="result-value">{result.value}</span>
-                            <span className="result-unit">{result.unit || '-'}</span>
-                            <span className="result-range">{result.referenceRange || '-'}</span>
-                            <span className="result-status">
-                              {result.isCritical ? '🔴 حرج' : result.isAbnormal ? '🟡 غير طبيعي' : '🟢 طبيعي'}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    )}
-
-                    {/* PDF Download */}
-                    {lab.resultPdfUrl && (
-                      <a href={lab.resultPdfUrl} target="_blank" rel="noopener noreferrer" className="lab-pdf-btn">
-                        <span>📄</span> تحميل التقرير PDF
-                      </a>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* PRESCRIPTIONS SECTION — prescriptions collection */}
-        {activeSection === 'prescriptions' && (
-          <div className="section-content">
-            <div className="page-section-header">
-              <div className="section-header-content">
-                <div className="section-icon-box"><span>📜</span></div>
-                <div><h1>الوصفات الطبية</h1><p>Prescriptions</p></div>
-              </div>
-              <div className="section-count-badge">{prescriptions.length} وصفة</div>
-            </div>
-
-            {loadingPrescriptions && (
-              <div className="loading-state"><div className="spinner"></div><p>جاري تحميل الوصفات...</p></div>
-            )}
-
-            {!loadingPrescriptions && prescriptions.length === 0 && (
-              <div className="empty-state-card">
-                <div className="empty-icon">📜</div>
-                <h3>لا توجد وصفات طبية</h3>
-                <p>سيتم عرض وصفاتك الطبية هنا بعد أن يصف لك الطبيب علاجاً</p>
-              </div>
-            )}
-
-            {!loadingPrescriptions && prescriptions.length > 0 && (
-              <div className="prescriptions-list">
-                {prescriptions.map((rx, i) => (
-                  <div key={rx._id || i} className={`prescription-card ${rx.status}`}>
-                    <div className="rx-card-header">
-                      <div className="rx-header-info">
-                        <span className="rx-number">📜 {rx.prescriptionNumber}</span>
-                        <span className="rx-date">{formatDate(rx.prescriptionDate)}</span>
-                      </div>
-                      <div className={`rx-status-badge ${rx.status}`}>
-                        {rx.status === 'active' ? '🟢 نشطة' :
-                         rx.status === 'dispensed' ? '✅ تم الصرف' :
-                         rx.status === 'partially_dispensed' ? '🟡 صرف جزئي' :
-                         rx.status === 'expired' ? '⏰ منتهية' : '❌ ملغاة'}
-                      </div>
-                    </div>
-
-                    {/* Medications in prescription */}
-                    <div className="rx-medications">
-                      {rx.medications && rx.medications.map((med, j) => (
-                        <div key={j} className={`rx-med-item ${med.isDispensed ? 'dispensed' : ''}`}>
-                          <span className="rx-med-icon">{med.isDispensed ? '✅' : '💊'}</span>
-                          <div className="rx-med-info">
-                            <strong>{med.medicationName}</strong>
-                            <span>{med.dosage} — {med.frequency} — {med.duration}</span>
-                            {med.route && <span className="rx-route-badge">{med.route === 'oral' ? 'فموي' : med.route === 'injection' ? 'حقن' : med.route}</span>}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-
-                    {/* QR Code + Verification */}
-                    {rx.status === 'active' && rx.verificationCode && (
-                      <div className="rx-verification">
-                        <div className="rx-qr-section">
-                          <span className="qr-icon">📱</span>
-                          <div className="qr-info">
-                            <span className="qr-label">رمز التحقق للصيدلية:</span>
-                            <span className="verification-code">{rx.verificationCode}</span>
-                          </div>
-                        </div>
-                        {rx.expiryDate && (
-                          <div className="rx-expiry">
-                            <span>⏰</span>
-                            <span>صالحة حتى: {formatDate(rx.expiryDate)}</span>
-                          </div>
+                  return (
+                    <li key={item.key}>
+                      <button
+                        type="button"
+                        className={`pd-sidebar-item${isActive ? ' is-active' : ''}`}
+                        onClick={() => {
+                          setActiveSection(item.key);
+                          setSidebarOpen(false);
+                        }}
+                        aria-current={isActive ? 'page' : undefined}
+                      >
+                        <Icon
+                          className="pd-sidebar-item-icon"
+                          size={18}
+                          aria-hidden="true"
+                        />
+                        <span className="pd-sidebar-item-label">{item.title}</span>
+                        {showUnreadBadge && (
+                          <span
+                            className="pd-sidebar-item-badge"
+                            aria-label={`${unreadNotificationsCount} غير مقروءة`}
+                          >
+                            {unreadNotificationsCount > 99
+                              ? '99+'
+                              : unreadNotificationsCount}
+                          </span>
                         )}
-                      </div>
-                    )}
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        {/* VISITS SECTION - REDESIGNED */}
-        {activeSection === 'visits' && (
-          <div className="section-content">
-            <div className="visits-page-container redesigned">
-              {/* Header */}
-              <div className="visits-page-header">
-                <div className="visits-header-content">
-                  <div className="visits-icon-box">
-                    <span>📋</span>
-                    <div className="pulse-ring"></div>
-                  </div>
-                  <div className="visits-header-text">
-                    <h1>سجل الزيارات الطبية</h1>
-                    <p>Medical Visits History</p>
-                  </div>
-                </div>
-                <div className="visits-count-badge">
-                  <span className="count-number">{visits.length}</span>
-                  <span>زيارة</span>
-                </div>
-              </div>
-
-              {/* Loading State */}
-              {loadingVisits && (
-                <div className="loading-state">
-                  <div className="spinner"></div>
-                  <p>جاري تحميل الزيارات...</p>
-                </div>
-              )}
-
-              {/* Empty State */}
-              {!loadingVisits && visits.length === 0 && (
-                <div className="empty-state-card">
-                  <div className="empty-icon">📋</div>
-                  <h3>لا توجد زيارات طبية</h3>
-                  <p>سيتم عرض زياراتك الطبية هنا بعد مراجعة الطبيب</p>
-                  <div className="empty-info">
-                    <span>💡</span>
-                    <p>سجل الزيارات يتضمن التشخيص والأدوية وملاحظات الطبيب</p>
-                  </div>
-                </div>
-              )}
-
-              {/* Visits Timeline - Professional Accordion */}
-              {!loadingVisits && visits.length > 0 && (
-                <div className="visits-timeline-professional">
-                  {visits.map((visit, index) => (
-                    <VisitDetailsAccordion
-                      key={visit._id || index}
-                      visit={visit}
-                      isExpanded={expandedVisit === (visit._id || index)}
-                      onToggle={() => toggleVisitExpansion(visit._id || index)}
-                      formatDateTime={formatDateTime}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
-        )}
-
-        {/* CONSULTATION SECTION */}
-        {activeSection === 'consultation' && (
-          <div className="section-content">
-            <div className="consultation-main-container">
-              <div className="consultation-page-header">
-                <div className="consultation-header-content">
-                  <div className="consultation-icon-box">
-                    <span className="ai-icon">🤖</span>
-                    <div className="ai-pulse-ring"></div>
-                  </div>
-                  <div className="consultation-header-text">
-                    <h1>استشيرني</h1>
-                    <p>AI Medical Consultation Assistant</p>
-                  </div>
-                </div>
-                <div className="consultation-header-badge">
-                  <span>🏥</span>
-                  <span>{MEDICAL_SPECIALIZATIONS.length} تخصص طبي</span>
-                </div>
-              </div>
-
-              <div className="consultation-disclaimer-banner">
-                <span>⚠️</span>
-                <p><strong>Important:</strong> This service provides guidance only and does not replace professional medical consultation.</p>
-              </div>
-              
-              <div className="symptoms-input-card">
-                <div className="input-card-header">
-                  <span>💬</span>
-                  <div>
-                    <h3>Describe Your Symptoms</h3>
-                    <p>صف أعراضك باللغة الإنجليزية</p>
-                  </div>
-                </div>
-                <div className="input-card-body">
-                  <textarea 
-                    className="symptoms-textarea-main" 
-                    placeholder="Example: I have chest pain and shortness of breath..." 
-                    value={symptoms} 
-                    onChange={e => setSymptoms(e.target.value)} 
-                    rows={4} 
-                    disabled={isAnalyzing} 
-                    dir="ltr" 
-                  />
-                  <div className="input-actions">
-                    {consultationResult && (
-                      <button className="reset-btn" onClick={resetConsultation}>
-                        <span>🔄</span>
-                        <span>استشارة جديدة</span>
                       </button>
-                    )}
-                    <button className="analyze-main-btn" onClick={handleAnalyzeSymptoms} disabled={!symptoms.trim() || isAnalyzing}>
-                      {isAnalyzing ? (
-                        <>
-                          <span className="spinner"></span>
-                          <span>Analyzing...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>🔍</span>
-                          <span>Analyze Symptoms</span>
-                        </>
-                      )}
-                    </button>
-                  </div>
-                </div>
-                {consultationError && (
-                  <div className="consultation-error-message">
-                    <span>❌</span>
-                    <p>{consultationError}</p>
-                  </div>
-                )}
-              </div>
-              
-              {consultationResult && (
-                <div className="consultation-result-card" ref={resultRef}>
-                  <div className="result-card-header">
-                    <div className="result-success-icon">✅</div>
-                    <div>
-                      <h3>Analysis Results</h3>
-                      <p>نتائج التحليل</p>
-                    </div>
-                  </div>
-                  <div className="result-card-body">
-                    <div className="result-info-row">
-                      <span className="result-label">🩺 Possible Condition:</span>
-                      <span className="result-value">{consultationResult.disease}</span>
-                    </div>
-                    
-                    <div className="result-info-row">
-                      <span className="result-label">🫀 Affected System:</span>
-                      <span className="result-value">{consultationResult.organSystem}</span>
-                    </div>
-                    
-                    <div className="result-specialization-card" style={{ borderColor: consultationResult.specialization.color }}>
-                      <div className="result-spec-icon" style={{ background: `${consultationResult.specialization.color}20` }}>
-                        <span>{consultationResult.specialization.icon}</span>
-                      </div>
-                      <div className="result-spec-info">
-                        <div className="result-label">👨‍⚕️ Recommended Specialist:</div>
-                        <h4>{consultationResult.specialization.nameAr}</h4>
-                        <p className="result-spec-en">{consultationResult.specialization.nameEn}</p>
-                        <p className="result-spec-desc">{consultationResult.specialization.description}</p>
-                      </div>
-                    </div>
-                    
-                    <div className="result-symptoms-ref">
-                      <span>💡</span>
-                      <div>
-                        <strong>Based on:</strong>
-                        <p>"{consultationResult.inputSymptoms}"</p>
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-
-              <div className="all-specializations-section">
-                <div className="specializations-section-header">
-                  <div className="spec-section-title">
-                    <span>🏥</span>
-                    <div>
-                      <h2>التخصصات الطبية المتاحة</h2>
-                      <p>All Available Medical Specializations</p>
-                    </div>
-                  </div>
-                  <div className="spec-count-badge">
-                    <span className="count-num">{MEDICAL_SPECIALIZATIONS.length}</span>
-                    <span>تخصص</span>
-                  </div>
-                </div>
-                <div className="specializations-elegant-grid">
-                  {MEDICAL_SPECIALIZATIONS.map((spec, i) => (
-                    <div key={spec.id} className="spec-elegant-card" style={{ '--spec-color': spec.color, '--delay': `${i * 0.03}s` }}>
-                      <div className="spec-card-top-accent" style={{ background: spec.color }}></div>
-                      <div className="spec-card-content">
-                        <div className="spec-icon-wrapper" style={{ background: `${spec.color}15` }}>
-                          <span>{spec.icon}</span>
-                        </div>
-                        <div className="spec-text-content">
-                          <h4>{spec.nameAr}</h4>
-                          <p>{spec.nameEn}</p>
-                        </div>
-                      </div>
-                      <div className="spec-hover-description">
-                        <p>{spec.description}</p>
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              </div>
-
-              <div className="how-service-works">
-                <div className="how-works-header">
-                  <span>📖</span>
-                  <div>
-                    <h3>كيف تعمل الخدمة؟</h3>
-                    <p>How does it work?</p>
-                  </div>
-                </div>
-                <div className="how-steps-container">
-                  <div className="how-step-item">
-                    <div className="step-num-circle"><span>1</span></div>
-                    <div className="step-info"><h4>Describe Symptoms</h4><p>وصف الأعراض</p></div>
-                  </div>
-                  <div className="step-arrow">→</div>
-                  <div className="how-step-item">
-                    <div className="step-num-circle"><span>2</span></div>
-                    <div className="step-info"><h4>AI Analysis</h4><p>تحليل الذكاء الاصطناعي</p></div>
-                  </div>
-                  <div className="step-arrow">→</div>
-                  <div className="how-step-item">
-                    <div className="step-num-circle"><span>3</span></div>
-                    <div className="step-info"><h4>Get Recommendation</h4><p>الحصول على التوصية</p></div>
-                  </div>
-                </div>
-              </div>
-
-              <div className="important-notice-box">
-                <div className="notice-icon-wrap">⚠️</div>
-                <div className="notice-content">
-                  <h4>تنبيه هام / Important Notice</h4>
-                  <p>هذه الخدمة استرشادية فقط ولا تغني عن الاستشارة الطبية المباشرة. في حالة الطوارئ، توجه لأقرب مستشفى فوراً.</p>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* MEDICATIONS SECTION */}
-      {activeSection === 'medications' && (
-  <div className="section-content">
-    <div className="medications-page-container">
-      {/* Header */}
-      <div className="medications-page-header">
-        <div className="medications-header-content">
-          <div className="medications-icon-box">
-            <span>💊</span>
-            <div className="pulse-ring"></div>
-          </div>
-          <div className="medications-header-text">
-            <h1>الأدوية الموصوفة</h1>
-            <p>Prescribed Medications</p>
-          </div>
-        </div>
-        <div className="medications-count-badge">
-          <span className="count-number">{medications.length}</span>
-          <span>دواء نشط</span>
-        </div>
-      </div>
-
-      {/* Loading State */}
-      {loadingMedications && (
-        <div className="loading-state">
-          <div className="spinner"></div>
-          <p>جاري تحميل الأدوية...</p>
-        </div>
-      )}
-
-      {/* Empty State */}
-      {!loadingMedications && medications.length === 0 && (
-        <div className="empty-state-card">
-          <div className="empty-icon">💊</div>
-          <h3>لا توجد أدوية موصوفة</h3>
-          <p>سيتم عرض الأدوية الموصوفة هنا بعد زيارة الطبيب</p>
-          <div className="empty-info">
-            <span>💡</span>
-            <p>يتم عرض تفاصيل كل دواء: الجرعة، التكرار، المدة، والتعليمات</p>
-          </div>
-        </div>
-      )}
-
-      {/* Active Medications */}
-      {!loadingMedications && medications.length > 0 && (
-        <>
-          {/* Current Medications List */}
-          <div className="current-medications-section">
-            <div className="section-header-meds">
-              <div className="header-left">
-                <span className="section-icon">📋</span>
-                <div>
-                  <h2>الأدوية النشطة</h2>
-                  <p>Active Medications</p>
-                </div>
-              </div>
-              <span className="meds-count-badge">{medications.length} دواء</span>
-            </div>
-
-            <div className="medications-grid">
-              {medications.map((med, index) => (
-                <div key={index} className="medication-card-calendar">
-                  {/* Card Header */}
-                  <div className="med-card-header-calendar">
-                    <div className="med-icon-wrapper">
-                      <span>💊</span>
-                    </div>
-                    <div className="med-header-info">
-                      <h3>{med.medicationName}</h3>
-                      <p className="med-dosage">{med.dosage}</p>
-                    </div>
-                  </div>
-
-                  {/* Card Body */}
-                  <div className="med-card-body-calendar">
-                    <div className="med-info-row">
-                      <span className="info-icon">🕐</span>
-                      <div className="info-content">
-                        <span className="info-label">التكرار:</span>
-                        <span className="info-value">{med.frequency}</span>
-                      </div>
-                    </div>
-
-                    {med.duration && (
-                      <div className="med-info-row">
-                        <span className="info-icon">⏱️</span>
-                        <div className="info-content">
-                          <span className="info-label">المدة:</span>
-                          <span className="info-value">{med.duration}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {med.instructions && (
-                      <div className="med-info-row">
-                        <span className="info-icon">📝</span>
-                        <div className="info-content">
-                          <span className="info-label">التعليمات:</span>
-                          <span className="info-value">{med.instructions}</span>
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Doctor Info */}
-                    <div className="med-doctor-info">
-                      <div className="doctor-avatar-small">
-                        <span>👨‍⚕️</span>
-                      </div>
-                      <div className="doctor-details-small">
-                        <span className="doctor-name-small">{med.doctorName}</span>
-                        {med.doctorSpecialization && (
-                          <span className="doctor-spec-small">{med.doctorSpecialization}</span>
-                        )}
-                      </div>
-                    </div>
-
-                    {/* Prescribed Date */}
-                    <div className="prescribed-date">
-                      <span className="date-icon">📅</span>
-                      <span className="date-text">
-                        {new Date(med.visitDate).toLocaleDateString('ar-EG', {
-                          year: 'numeric',
-                          month: 'short',
-                          day: 'numeric'
-                        })}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-
-          {/* Medication Instructions Banner */}
-          <div className="medication-instructions-banner">
-            <div className="instructions-icon">⚠️</div>
-            <div className="instructions-content">
-              <h4>تعليمات هامة</h4>
-              <ul>
-                <li>التزم بالجرعة والتكرار والمدة المحددة من قبل الطبيب</li>
-                <li>لا توقف أو تغير الجرعة دون استشارة الطبيب</li>
-                <li>احتفظ بالأدوية في مكان آمن وبعيد عن متناول الأطفال</li>
-                <li>في حالة نسيان جرعة، استشر الطبيب أو الصيدلي</li>
+                    </li>
+                  );
+                })}
               </ul>
             </div>
+          ))}
+        </nav>
+
+        <div className="pd-sidebar-footer">
+          <button
+            type="button"
+            className="pd-sidebar-item pd-sidebar-item--danger"
+            onClick={handleLogout}
+          >
+            <LogOut
+              className="pd-sidebar-item-icon"
+              size={18}
+              aria-hidden="true"
+            />
+            <span className="pd-sidebar-item-label">تسجيل الخروج</span>
+          </button>
+        </div>
+      </aside>
+    </>
+  );
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Page header
+  // ════════════════════════════════════════════════════════════════════
+
+  const renderPageHeader = () => {
+    const meta = SECTION_META[activeSection] || SECTION_META.home;
+    const SectionIcon = meta.icon;
+
+    return (
+      <header className="pd-page-header">
+        <div className="pd-page-header-left">
+          <button
+            type="button"
+            className="pd-mobile-menu-btn"
+            onClick={() => setSidebarOpen(true)}
+            aria-label="فتح القائمة"
+          >
+            <Menu size={22} aria-hidden="true" />
+          </button>
+
+          <div className="pd-page-header-icon" aria-hidden="true">
+            <SectionIcon size={24} />
           </div>
-        </>
+
+          <div className="pd-page-header-title">
+            <h1>{meta.title}</h1>
+            <p>{meta.subtitle}</p>
+          </div>
+        </div>
+
+        <div className="pd-page-header-right">
+          <button
+            type="button"
+            className="pd-page-header-bell"
+            onClick={() => setActiveSection('notifications')}
+            aria-label={
+              unreadNotificationsCount > 0
+                ? `الإشعارات (${unreadNotificationsCount} غير مقروءة)`
+                : 'الإشعارات'
+            }
+          >
+            <Bell size={20} aria-hidden="true" />
+            {unreadNotificationsCount > 0 && (
+              <span className="pd-page-header-bell-badge" aria-hidden="true">
+                {unreadNotificationsCount > 99
+                  ? '99+'
+                  : unreadNotificationsCount}
+              </span>
+            )}
+          </button>
+        </div>
+      </header>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Home section
+  // ════════════════════════════════════════════════════════════════════
+
+  const getTimeGreeting = () => {
+    const hour = new Date().getHours();
+    if (hour >= 5 && hour < 12) return 'صباح الخير';
+    return 'مساء الخير';
+  };
+
+  const renderHome = () => {
+    const firstName = identity?.firstName || null;
+    const greeting = getTimeGreeting();
+
+    const ACTIVITY_TYPE_META = {
+      appointment:  { icon: Calendar,     label: 'موعد'          },
+      visit:        { icon: Stethoscope,  label: 'زيارة'          },
+      prescription: { icon: Pill,         label: 'وصفة طبية'      },
+      lab_test:     { icon: FlaskConical, label: 'تحليل مخبري'    },
+      notification: { icon: Bell,         label: 'إشعار'          },
+    };
+
+    const kpiTiles = [
+      { key: 'upcoming-appts', icon: Calendar,     value: overview?.upcomingAppointments ?? 0, label: 'مواعيد قادمة',       navigateTo: 'appointments',  variant: 'info'    },
+      { key: 'active-rx',      icon: Pill,         value: overview?.activePrescriptions ?? 0,  label: 'وصفات نشطة',         navigateTo: 'prescriptions', variant: 'success' },
+      { key: 'pending-labs',   icon: FlaskConical, value: overview?.pendingLabResults ?? 0,    label: 'نتائج مختبر بانتظار', navigateTo: 'lab-results',   variant: 'warning' },
+      { key: 'unread-notifs',  icon: Bell,         value: overview?.unreadNotifications ?? 0,  label: 'إشعارات غير مقروءة',  navigateTo: 'notifications', variant: 'accent'  },
+    ];
+
+    const quickActions = [
+      { key: 'book-appt', icon: Plus,     label: 'حجز موعد جديد', target: 'appointments'  },
+      { key: 'view-rx',   icon: Pill,     label: 'عرض الوصفات',   target: 'prescriptions' },
+      { key: 'ai-assist', icon: Sparkles, label: 'المساعد الذكي', target: 'ai-assistant'  },
+      { key: 'profile',   icon: User,     label: 'ملفي الشخصي',    target: 'profile'       },
+    ];
+
+    const recentActivity = Array.isArray(overview?.recentActivity)
+      ? overview.recentActivity
+      : [];
+
+    return (
+      <div className="pd-home">
+        <section className="pd-hero" aria-label="ترحيب">
+          <div className="pd-hero-text">
+            {profileLoading ? (
+              <span className="pd-hero-title-placeholder" aria-hidden="true">
+                …
+              </span>
+            ) : (
+              <h2 className="pd-hero-title" dir="auto">
+                {greeting}
+                {firstName && (
+                  <>
+                    ،{' '}
+                    <span className="pd-hero-name" dir="auto">
+                      {firstName}
+                    </span>
+                  </>
+                )}
+              </h2>
+            )}
+            <p className="pd-hero-subtitle">
+              نتمنى لك يوماً صحياً. يمكنك متابعة مواعيدك ووصفاتك ونتائج الفحوصات من هنا.
+            </p>
+          </div>
+          <div className="pd-hero-icon" aria-hidden="true">
+            <HeartPulse size={48} />
+          </div>
+        </section>
+
+        <section className="pd-kpi-grid" aria-label="مؤشرات سريعة">
+          {kpiTiles.map(({ key, icon: Icon, value, label, navigateTo, variant }) => (
+            <button
+              key={key}
+              type="button"
+              className={`pd-kpi-tile pd-kpi-tile--${variant}`}
+              onClick={() => setActiveSection(navigateTo)}
+              aria-label={`${label}: ${value}`}
+            >
+              <div className="pd-kpi-tile-icon" aria-hidden="true">
+                <Icon size={22} />
+              </div>
+              <div className="pd-kpi-tile-value">
+                {overviewLoading ? '…' : value}
+              </div>
+              <div className="pd-kpi-tile-label">{label}</div>
+            </button>
+          ))}
+        </section>
+
+        <section className="pd-home-split">
+          <div className="pd-card">
+            <div className="pd-card-header">
+              <h3 className="pd-card-title">
+                <Clock size={18} aria-hidden="true" />
+                <span>النشاط الأخير</span>
+              </h3>
+            </div>
+            <div className="pd-card-body">
+              {overviewLoading ? (
+                <div className="pd-activity-loading" aria-busy="true">
+                  <LoadingSpinner message="جاري التحميل..." />
+                </div>
+              ) : recentActivity.length === 0 ? (
+                <EmptyState
+                  icon={Clock}
+                  title="لا يوجد نشاط حديث"
+                  subtitle="سيظهر هنا آخر نشاطاتك الطبية."
+                />
+              ) : (
+                <ol className="pd-activity-list">
+                  {recentActivity.map((activity) => {
+                    const meta =
+                      ACTIVITY_TYPE_META[activity.type] ||
+                      ACTIVITY_TYPE_META.notification;
+                    const ItemIcon = meta.icon;
+                    return (
+                      <li key={activity._id} className="pd-activity-item">
+                        <div
+                          className={`pd-activity-item-icon pd-activity-item-icon--${activity.type || 'notification'}`}
+                          aria-hidden="true"
+                        >
+                          <ItemIcon size={16} />
+                        </div>
+                        <div className="pd-activity-item-body">
+                          <span className="pd-activity-item-type">
+                            {meta.label}
+                          </span>
+                          <p className="pd-activity-item-title" dir="auto">
+                            {activity.title || '—'}
+                          </p>
+                          {activity.subtitle && (
+                            <p className="pd-activity-item-subtitle" dir="auto">
+                              {activity.subtitle}
+                            </p>
+                          )}
+                        </div>
+                        <div className="pd-activity-item-time" dir="ltr">
+                          <time dateTime={activity.occurredAt}>
+                            {formatDateTime(activity.occurredAt)}
+                          </time>
+                        </div>
+                      </li>
+                    );
+                  })}
+                </ol>
+              )}
+            </div>
+          </div>
+
+          <div className="pd-card">
+            <div className="pd-card-header">
+              <h3 className="pd-card-title">
+                <Sparkles size={18} aria-hidden="true" />
+                <span>إجراءات سريعة</span>
+              </h3>
+            </div>
+            <div className="pd-card-body">
+              <div className="pd-quick-actions">
+                {quickActions.map(({ key, icon: Icon, label, target }) => (
+                  <button
+                    key={key}
+                    type="button"
+                    className="pd-quick-action"
+                    onClick={() => setActiveSection(target)}
+                  >
+                    <Icon
+                      className="pd-quick-action-icon"
+                      size={22}
+                      aria-hidden="true"
+                    />
+                    <span className="pd-quick-action-label">{label}</span>
+                    <ChevronLeft
+                      className="pd-quick-action-arrow"
+                      size={16}
+                      aria-hidden="true"
+                    />
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Appointments section
+  // ════════════════════════════════════════════════════════════════════
+
+  const APPOINTMENT_STATUS_GROUPS = {
+    upcoming:  ['scheduled', 'confirmed', 'checked_in', 'in_progress'],
+    past:      ['completed'],
+    cancelled: ['cancelled', 'no_show', 'rescheduled'],
+  };
+
+  const renderAppointments = () => {
+    const filteredAppointments = appointments.filter((appt) =>
+      APPOINTMENT_STATUS_GROUPS[appointmentTab]?.includes(appt.status)
+    );
+
+    const openBookingFlow = () => {
+      openCustomModal('حجز موعد جديد', (
+        <AppointmentBookingFlow
+          openAlert={openAlert}
+          onClose={closeModal}
+          onSuccess={() => {
+            closeModal();
+            openAlert('success', 'تم الحجز بنجاح', 'سيصلك إشعار للتأكيد قريباً.');
+            loadAppointments(true);
+          }}
+        />
+      ), 'lg');
+    };
+
+    const openCancelFlow = (appointment) => {
+      const submit = async (payload) => {
+        try {
+          const res = await patientAPI.cancelAppointment(appointment._id, payload);
+          if (res?.success) {
+            closeModal();
+            openAlert('success', 'تم إلغاء الموعد', 'تم تحديث حالة الموعد بنجاح.');
+            loadAppointments(true);
+          } else {
+            openAlert('error', 'تعذر الإلغاء', res?.message || 'حدث خطأ');
+          }
+        } catch (err) {
+          openAlert('error', 'تعذر الإلغاء', err?.message || 'حدث خطأ في الاتصال');
+        }
+      };
+
+      openCustomModal('إلغاء الموعد', (
+        <AppointmentCancelForm
+          appointment={appointment}
+          onCancel={closeModal}
+          onConfirm={submit}
+          submitting={false}
+        />
+      ));
+    };
+
+    return (
+      <div className="pd-appointments">
+        <div className="pd-section-toolbar">
+          <div className="pd-tabs" role="tablist">
+            {[
+              { key: 'upcoming',  label: 'القادمة'  },
+              { key: 'past',      label: 'السابقة'   },
+              { key: 'cancelled', label: 'الملغاة'   },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={appointmentTab === key}
+                className={`pd-tab${appointmentTab === key ? ' is-active' : ''}`}
+                onClick={() => setAppointmentTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+          <button type="button" className="pd-btn pd-btn--primary" onClick={openBookingFlow}>
+            <Plus size={16} aria-hidden="true" />
+            <span>حجز موعد جديد</span>
+          </button>
+        </div>
+
+        {appointmentsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل المواعيد..." />
+          </div>
+        ) : filteredAppointments.length === 0 ? (
+          <EmptyState
+            icon={Calendar}
+            title="لا توجد مواعيد"
+            subtitle={
+              appointmentTab === 'upcoming'
+                ? 'احجز موعدك الأول من الزر أعلاه.'
+                : 'ستظهر هنا عند توفرها.'
+            }
+            cta={appointmentTab === 'upcoming' ? { label: 'حجز موعد', onClick: openBookingFlow } : undefined}
+          />
+        ) : (
+          <ul className="pd-appointment-list">
+            {filteredAppointments.map((appt) => {
+              const isUpcoming = APPOINTMENT_STATUS_GROUPS.upcoming.includes(appt.status);
+              return (
+                <li key={appt._id} className="pd-appointment-card">
+                  <div className="pd-appointment-card-head">
+                    <div className="pd-appointment-card-icon" aria-hidden="true">
+                      <Calendar size={20} />
+                    </div>
+                    <div className="pd-appointment-card-title">
+                      <h3 dir="auto">{appt.reasonForVisit || 'موعد طبي'}</h3>
+                      <span className={`pd-appointment-status pd-appointment-status--${appt.status}`}>
+                        {appt.status}
+                      </span>
+                    </div>
+                    {appt.priority && appt.priority !== 'routine' && (
+                      <span className={`pd-appointment-priority pd-appointment-priority--${appt.priority}`}>
+                        {appt.priority === 'emergency' ? 'طارئ' : 'عاجل'}
+                      </span>
+                    )}
+                  </div>
+                  <div className="pd-appointment-card-body">
+                    <p className="pd-appointment-meta">
+                      <Clock size={14} aria-hidden="true" />
+                      <span dir="ltr">{formatDate(appt.appointmentDate)}</span>
+                      <span dir="ltr">{appt.appointmentTime}</span>
+                    </p>
+                  </div>
+                  {isUpcoming && (
+                    <div className="pd-appointment-card-actions">
+                      <button
+                        type="button"
+                        className="pd-btn pd-btn--ghost pd-btn--danger"
+                        onClick={() => openCancelFlow(appt)}
+                      >
+                        <XCircle size={16} aria-hidden="true" />
+                        <span>إلغاء الموعد</span>
+                      </button>
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Visits section
+  // ════════════════════════════════════════════════════════════════════
+
+  const toggleVisit = (visitId) => {
+    setExpandedVisits((prev) => {
+      const next = new Set(prev);
+      if (next.has(visitId)) next.delete(visitId);
+      else next.add(visitId);
+      return next;
+    });
+  };
+
+  const VISIT_TYPE_LABELS = {
+    regular:      'زيارة اعتيادية',
+    follow_up:    'متابعة',
+    emergency:    'طارئة',
+    consultation: 'استشارة',
+    dental:       'طب الأسنان',
+    lab_only:     'فحوصات فقط',
+  };
+
+  const VISIT_STATUS_LABELS = {
+    in_progress: 'جارية',
+    completed:   'مكتملة',
+    cancelled:   'ملغاة',
+  };
+
+  const PAYMENT_STATUS_LABELS = {
+    paid:            'مدفوع',
+    pending:         'بانتظار الدفع',
+    partially_paid:  'مدفوع جزئياً',
+    cancelled:       'ملغى',
+    free:            'مجاني',
+  };
+
+  const renderVitalSigns = (vitals) => {
+    if (!vitals || typeof vitals !== 'object') return null;
+    const items = [
+      { key: 'bloodPressureSystolic',  label: 'ضغط الدم الانقباضي',  value: vitals.bloodPressureSystolic,  unit: 'mmHg'        },
+      { key: 'bloodPressureDiastolic', label: 'ضغط الدم الانبساطي',  value: vitals.bloodPressureDiastolic, unit: 'mmHg'        },
+      { key: 'heartRate',              label: 'النبض',                  value: vitals.heartRate,              unit: 'نبضة/دقيقة' },
+      { key: 'oxygenSaturation',       label: 'الأكسجين',                value: vitals.oxygenSaturation,       unit: '%'           },
+      { key: 'bloodGlucose',           label: 'سكر الدم',                value: vitals.bloodGlucose,           unit: 'mg/dL'       },
+      { key: 'temperature',            label: 'الحرارة',                  value: vitals.temperature,            unit: '°C'          },
+      { key: 'weight',                 label: 'الوزن',                    value: vitals.weight,                 unit: 'كغ'           },
+      { key: 'height',                 label: 'الطول',                    value: vitals.height,                 unit: 'سم'           },
+      { key: 'respiratoryRate',        label: 'التنفس',                   value: vitals.respiratoryRate,        unit: 'نفس/دقيقة'  },
+    ].filter((i) => i.value !== undefined && i.value !== null);
+
+    if (items.length === 0) return null;
+
+    return (
+      <dl className="pd-visit-vitals">
+        {items.map((item) => (
+          <div key={item.key} className="pd-visit-vital">
+            <dt className="pd-visit-vital-label">{item.label}</dt>
+            <dd className="pd-visit-vital-value" dir="ltr">
+              {item.value}{' '}
+              <span className="pd-visit-vital-unit">{item.unit}</span>
+            </dd>
+          </div>
+        ))}
+      </dl>
+    );
+  };
+
+  const renderVisits = () => (
+    <div className="pd-visits">
+      {visitsLoading ? (
+        <div className="pd-section-loading">
+          <LoadingSpinner message="جاري تحميل الزيارات..." />
+        </div>
+      ) : visits.length === 0 ? (
+        <EmptyState
+          icon={FileText}
+          title="لا توجد زيارات مسجلة"
+          subtitle="ستظهر هنا زياراتك الطبية بعد تسجيلها من قبل الطبيب."
+        />
+      ) : (
+        <ol className="pd-visit-timeline">
+          {visits.map((visit) => {
+            const isExpanded = expandedVisits.has(visit._id);
+            const typeLabel = VISIT_TYPE_LABELS[visit.visitType] || 'زيارة';
+            const statusLabel = VISIT_STATUS_LABELS[visit.status] || visit.status;
+            const vitalsJSX = renderVitalSigns(visit.vitalSigns);
+            const meds = Array.isArray(visit.prescribedMedications)
+              ? visit.prescribedMedications
+              : [];
+
+            return (
+              <li key={visit._id} className="pd-visit-item">
+                <div className="pd-visit-marker" aria-hidden="true">
+                  <Stethoscope size={16} />
+                </div>
+
+                <article className={`pd-visit-card${isExpanded ? ' is-expanded' : ''}`}>
+                  <button
+                    type="button"
+                    className="pd-visit-card-head"
+                    onClick={() => toggleVisit(visit._id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`pd-visit-body-${visit._id}`}
+                  >
+                    <div className="pd-visit-card-title">
+                      <h3 dir="auto">{visit.chiefComplaint || typeLabel}</h3>
+                      <div className="pd-visit-card-meta">
+                        <span className="pd-visit-type-badge">{typeLabel}</span>
+                        <span className="pd-visit-date" dir="ltr">
+                          <Calendar size={12} aria-hidden="true" />
+                          <time dateTime={visit.visitDate}>{formatDate(visit.visitDate)}</time>
+                        </span>
+                        {visit.status && (
+                          <span className={`pd-visit-status pd-visit-status--${visit.status}`}>
+                            {statusLabel}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <ChevronDown className="pd-visit-card-chevron" size={18} aria-hidden="true" />
+                  </button>
+
+                  {isExpanded && (
+                    <div id={`pd-visit-body-${visit._id}`} className="pd-visit-card-body">
+                      {visit.diagnosis && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <Activity size={16} aria-hidden="true" />
+                            <span>التشخيص</span>
+                          </h4>
+                          <p dir="auto">{visit.diagnosis}</p>
+                        </section>
+                      )}
+
+                      {vitalsJSX && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <HeartPulse size={16} aria-hidden="true" />
+                            <span>العلامات الحيوية</span>
+                          </h4>
+                          {vitalsJSX}
+                        </section>
+                      )}
+
+                      {meds.length > 0 && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <Pill size={16} aria-hidden="true" />
+                            <span>الأدوية الموصوفة</span>
+                          </h4>
+                          <ul className="pd-visit-meds">
+                            {meds.map((med, idx) => (
+                              <li key={idx} className="pd-visit-med">
+                                <strong dir="auto">{med.medicationName}</strong>
+                                <span dir="auto">
+                                  {[med.dosage, med.frequency, med.duration].filter(Boolean).join(' • ')}
+                                </span>
+                                {med.instructions && (
+                                  <span className="pd-visit-med-note" dir="auto">{med.instructions}</span>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+
+                      {visit.doctorNotes && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <FileText size={16} aria-hidden="true" />
+                            <span>ملاحظات الطبيب</span>
+                          </h4>
+                          <p dir="auto">{visit.doctorNotes}</p>
+                        </section>
+                      )}
+
+                      {visit.followUpDate && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <Calendar size={16} aria-hidden="true" />
+                            <span>موعد المتابعة</span>
+                          </h4>
+                          <p>
+                            <span dir="ltr">{formatDate(visit.followUpDate)}</span>
+                            {visit.followUpNotes && (
+                              <span dir="auto">{' — '}{visit.followUpNotes}</span>
+                            )}
+                          </p>
+                        </section>
+                      )}
+
+                      {visit.visitPhotoUrl && (
+                        <section className="pd-visit-subsection">
+                          <h4 className="pd-visit-subsection-title">
+                            <FileText size={16} aria-hidden="true" />
+                            <span>صورة مرفقة</span>
+                          </h4>
+                          <a
+                            href={visit.visitPhotoUrl}
+                            target="_blank"
+                            rel="noopener noreferrer"
+                            className="pd-visit-photo-link"
+                          >
+                            <img
+                              src={visit.visitPhotoUrl}
+                              alt="صورة الزيارة"
+                              className="pd-visit-photo"
+                            />
+                            <span className="pd-visit-photo-hint">
+                              <ExternalLink size={12} aria-hidden="true" />
+                              <span>عرض بالحجم الكامل</span>
+                            </span>
+                          </a>
+                        </section>
+                      )}
+
+                      {visit.ecgAnalysis && (
+                        <section className="pd-visit-subsection pd-visit-ecg">
+                          <h4 className="pd-visit-subsection-title">
+                            <Heart size={16} aria-hidden="true" />
+                            <span>تحليل تخطيط القلب</span>
+                          </h4>
+                          <div className="pd-visit-ecg-body">
+                            {visit.ecgAnalysis.topPrediction && (
+                              <p>
+                                <strong>النتيجة: </strong>
+                                <span dir="auto">{visit.ecgAnalysis.topPrediction}</span>
+                              </p>
+                            )}
+                            {visit.ecgAnalysis.recommendation && (
+                              <p dir="auto">{visit.ecgAnalysis.recommendation}</p>
+                            )}
+                            {visit.ecgAnalysis.ecgImageUrl && (
+                              <a
+                                href={visit.ecgAnalysis.ecgImageUrl}
+                                target="_blank"
+                                rel="noopener noreferrer"
+                                className="pd-visit-ecg-link"
+                              >
+                                <ExternalLink size={14} aria-hidden="true" />
+                                <span>عرض صورة التخطيط</span>
+                              </a>
+                            )}
+                          </div>
+                        </section>
+                      )}
+
+                      {visit.paymentStatus && (
+                        <div className="pd-visit-payment">
+                          <span className="pd-visit-payment-label">حالة الدفع:</span>
+                          <span className={`pd-visit-payment-status pd-visit-payment-status--${visit.paymentStatus}`}>
+                            {PAYMENT_STATUS_LABELS[visit.paymentStatus] || visit.paymentStatus}
+                          </span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+                </article>
+              </li>
+            );
+          })}
+        </ol>
       )}
     </div>
-  </div>
-)}
+  );
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Prescriptions section
+  // ════════════════════════════════════════════════════════════════════
+
+  const togglePrescription = (id) => {
+    setExpandedPrescriptions((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+
+  const PRESCRIPTION_STATUS_GROUPS = {
+    active:    ['active', 'partially_dispensed'],
+    dispensed: ['dispensed'],
+    expired:   ['expired', 'cancelled'],
+  };
+
+  const PRESCRIPTION_STATUS_LABELS = {
+    active:               'نشطة',
+    dispensed:            'تم الصرف',
+    partially_dispensed:  'صرف جزئي',
+    expired:              'منتهية',
+    cancelled:            'ملغاة',
+  };
+
+  const renderPrescriptions = () => {
+    const filtered = prescriptions.filter((rx) =>
+      PRESCRIPTION_STATUS_GROUPS[prescriptionTab]?.includes(rx.status)
+    );
+
+    return (
+      <div className="pd-prescriptions">
+        <div className="pd-section-toolbar">
+          <div className="pd-tabs" role="tablist">
+            {[
+              { key: 'active',    label: 'النشطة'         },
+              { key: 'dispensed', label: 'تم صرفها'        },
+              { key: 'expired',   label: 'منتهية/ملغاة'   },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={prescriptionTab === key}
+                className={`pd-tab${prescriptionTab === key ? ' is-active' : ''}`}
+                onClick={() => setPrescriptionTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {prescriptionsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل الوصفات..." />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Pill}
+            title="لا توجد وصفات"
+            subtitle={
+              prescriptionTab === 'active'
+                ? 'ستظهر هنا الوصفات النشطة بعد كتابتها من قبل الطبيب.'
+                : 'لا يوجد محتوى لعرضه في هذا التبويب.'
+            }
+          />
+        ) : (
+          <ul className="pd-prescription-list">
+            {filtered.map((rx) => {
+              const isExpanded = expandedPrescriptions.has(rx._id);
+              const meds = Array.isArray(rx.medications) ? rx.medications : [];
+              const dispensedCount = meds.filter((m) => m.isDispensed).length;
+
+              return (
+                <li key={rx._id} className="pd-prescription-card">
+                  <button
+                    type="button"
+                    className="pd-prescription-head"
+                    onClick={() => togglePrescription(rx._id)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`pd-rx-body-${rx._id}`}
+                  >
+                    <div className="pd-prescription-head-left">
+                      <div className="pd-prescription-icon" aria-hidden="true">
+                        <Pill size={20} />
+                      </div>
+                      <div className="pd-prescription-title">
+                        <h3 dir="ltr">{rx.prescriptionNumber}</h3>
+                        <div className="pd-prescription-meta">
+                          <span className="pd-prescription-date" dir="ltr">
+                            <Calendar size={12} aria-hidden="true" />
+                            <time dateTime={rx.prescriptionDate}>{formatDate(rx.prescriptionDate)}</time>
+                          </span>
+                          <span className={`pd-prescription-status pd-prescription-status--${rx.status}`}>
+                            {PRESCRIPTION_STATUS_LABELS[rx.status] || rx.status}
+                          </span>
+                          <span className="pd-prescription-count">
+                            {meds.length} دواء
+                            {dispensedCount > 0 && ` · ${dispensedCount} مصروف`}
+                          </span>
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronDown className="pd-prescription-chevron" size={18} aria-hidden="true" />
+                  </button>
+
+                  {isExpanded && (
+                    <div id={`pd-rx-body-${rx._id}`} className="pd-prescription-body">
+                      {meds.length > 0 && (
+                        <section className="pd-prescription-section">
+                          <h4 className="pd-prescription-section-title">الأدوية</h4>
+                          <ul className="pd-prescription-meds">
+                            {meds.map((med, idx) => (
+                              <li
+                                key={idx}
+                                className={`pd-prescription-med${med.isDispensed ? ' is-dispensed' : ''}`}
+                              >
+                                <div className="pd-prescription-med-head">
+                                  <strong dir="auto">
+                                    {med.medicationName}
+                                    {med.arabicName && (
+                                      <span className="pd-prescription-med-ar">
+                                        {' — '}{med.arabicName}
+                                      </span>
+                                    )}
+                                  </strong>
+                                  {med.isDispensed && (
+                                    <span className="pd-prescription-med-badge">
+                                      <CheckCircle2 size={12} aria-hidden="true" />
+                                      <span>مصروف</span>
+                                    </span>
+                                  )}
+                                </div>
+                                <p className="pd-prescription-med-details" dir="auto">
+                                  {[med.dosage, med.frequency, med.duration].filter(Boolean).join(' • ')}
+                                </p>
+                                {med.instructions && (
+                                  <p className="pd-prescription-med-note" dir="auto">{med.instructions}</p>
+                                )}
+                              </li>
+                            ))}
+                          </ul>
+                        </section>
+                      )}
+
+                      <section className="pd-prescription-section pd-prescription-verification">
+                        <h4 className="pd-prescription-section-title">رمز التحقق للصيدلية</h4>
+                        <div className="pd-prescription-code-row">
+                          {rx.verificationCode && (
+                            <div
+                              className="pd-prescription-code-pill"
+                              dir="ltr"
+                              aria-label={`رمز التحقق: ${rx.verificationCode}`}
+                            >
+                              {rx.verificationCode}
+                            </div>
+                          )}
+                          {/* TODO: replace with real QR render when qrcode.react is added. */}
+                          <div className="pd-prescription-qr-placeholder" aria-label="رمز QR للصرف">
+                            <ShieldCheck size={32} aria-hidden="true" />
+                            <span>رمز QR</span>
+                          </div>
+                        </div>
+                        <p className="pd-prescription-hint">أبرز هذا الرمز للصيدلي عند الصرف.</p>
+                      </section>
+
+                      {rx.expiryDate && (
+                        <div className="pd-prescription-expiry">
+                          <Clock size={14} aria-hidden="true" />
+                          <span>تنتهي في </span>
+                          <span dir="ltr">{formatDate(rx.expiryDate)}</span>
+                        </div>
+                      )}
+
+                      {rx.prescriptionNotes && (
+                        <section className="pd-prescription-section">
+                          <h4 className="pd-prescription-section-title">ملاحظات</h4>
+                          <p dir="auto">{rx.prescriptionNotes}</p>
+                        </section>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
       </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Lab results section
+  // ════════════════════════════════════════════════════════════════════
+
+  const LAB_STATUS_GROUPS = {
+    pending:   ['ordered', 'scheduled', 'sample_collected', 'in_progress'],
+    results:   ['completed'],
+    cancelled: ['cancelled', 'rejected'],
+  };
+
+  const LAB_STATUS_LABELS = {
+    ordered:          'معلّقة',
+    scheduled:        'مجدولة',
+    sample_collected: 'تم سحب العينة',
+    in_progress:      'قيد التنفيذ',
+    completed:        'مكتملة',
+    cancelled:        'ملغاة',
+    rejected:         'مرفوضة',
+  };
+
+  const toggleLabTest = async (lab) => {
+    const wasExpanded = expandedLabTests.has(lab._id);
+
+    setExpandedLabTests((prev) => {
+      const next = new Set(prev);
+      if (next.has(lab._id)) next.delete(lab._id);
+      else next.add(lab._id);
+      return next;
+    });
+
+    if (!wasExpanded && lab.status === 'completed' && !lab.isViewedByPatient) {
+      try {
+        await patientAPI.markLabTestViewed(lab._id);
+        setLabTests((prev) =>
+          prev.map((t) =>
+            t._id === lab._id ? { ...t, isViewedByPatient: true } : t
+          )
+        );
+      } catch {
+        // Silent — next page load will reconcile.
+      }
+    }
+  };
+
+  const renderLabTests = () => {
+    const filtered = labTests.filter((lab) =>
+      LAB_STATUS_GROUPS[labTestTab]?.includes(lab.status)
+    );
+
+    return (
+      <div className="pd-lab-tests">
+        <div className="pd-section-toolbar">
+          <div className="pd-tabs" role="tablist">
+            {[
+              { key: 'pending',   label: 'قيد الإنتظار' },
+              { key: 'results',   label: 'النتائج'        },
+              { key: 'cancelled', label: 'ملغاة'          },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={labTestTab === key}
+                className={`pd-tab${labTestTab === key ? ' is-active' : ''}`}
+                onClick={() => setLabTestTab(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {labTestsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل النتائج..." />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={FlaskConical}
+            title="لا توجد نتائج في هذا التبويب"
+            subtitle="ستظهر هنا فور توفرها من المختبر."
+          />
+        ) : (
+          <ul className="pd-lab-list">
+            {filtered.map((lab) => {
+              const isExpanded = expandedLabTests.has(lab._id);
+              const results = Array.isArray(lab.testResults) ? lab.testResults : [];
+              const abnormalCount = results.filter((r) => r.isAbnormal || r.isCritical).length;
+              const criticalCount = results.filter((r) => r.isCritical).length;
+              const isUnread = lab.status === 'completed' && !lab.isViewedByPatient;
+
+              return (
+                <li key={lab._id} className="pd-lab-card">
+                  <button
+                    type="button"
+                    className="pd-lab-head"
+                    onClick={() => toggleLabTest(lab)}
+                    aria-expanded={isExpanded}
+                    aria-controls={`pd-lab-body-${lab._id}`}
+                  >
+                    <div className="pd-lab-head-left">
+                      <div className="pd-lab-icon" aria-hidden="true">
+                        <FlaskConical size={20} />
+                      </div>
+                      <div className="pd-lab-title">
+                        <h3 dir="ltr">{lab.testNumber}</h3>
+                        <div className="pd-lab-meta">
+                          <span className="pd-lab-date" dir="ltr">
+                            <Calendar size={12} aria-hidden="true" />
+                            <time dateTime={lab.orderDate}>{formatDate(lab.orderDate)}</time>
+                          </span>
+                          <span className={`pd-lab-status pd-lab-status--${lab.status}`}>
+                            {LAB_STATUS_LABELS[lab.status] || lab.status}
+                          </span>
+                          {isUnread && (
+                            <span className="pd-lab-unread-dot" aria-label="نتيجة غير مقروءة">
+                              •
+                            </span>
+                          )}
+                          {criticalCount > 0 && (
+                            <span className="pd-lab-flag pd-lab-flag--critical">
+                              <AlertOctagon size={12} aria-hidden="true" />
+                              <span>حرجة</span>
+                            </span>
+                          )}
+                          {criticalCount === 0 && abnormalCount > 0 && (
+                            <span className="pd-lab-flag pd-lab-flag--abnormal">
+                              <AlertTriangle size={12} aria-hidden="true" />
+                              <span>غير طبيعية</span>
+                            </span>
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                    <ChevronDown className="pd-lab-chevron" size={18} aria-hidden="true" />
+                  </button>
+
+                  {isExpanded && (
+                    <div id={`pd-lab-body-${lab._id}`} className="pd-lab-body">
+                      {results.length > 0 ? (
+                        <div className="pd-lab-results-wrap">
+                          <table className="pd-lab-results-table">
+                            <thead>
+                              <tr>
+                                <th scope="col">الفحص</th>
+                                <th scope="col">القيمة</th>
+                                <th scope="col">المعدل الطبيعي</th>
+                              </tr>
+                            </thead>
+                            <tbody>
+                              {results.map((r, idx) => {
+                                const rowClass =
+                                  r.isCritical ? 'is-critical'
+                                  : r.isAbnormal ? 'is-abnormal'
+                                  : '';
+                                return (
+                                  <tr key={idx} className={rowClass}>
+                                    <td dir="auto">{r.testName}</td>
+                                    <td dir="ltr">
+                                      {r.value}
+                                      {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
+                                    </td>
+                                    <td dir="ltr">{r.referenceRange || '—'}</td>
+                                  </tr>
+                                );
+                              })}
+                            </tbody>
+                          </table>
+                        </div>
+                      ) : (
+                        <p className="pd-lab-no-results">لم تصدر النتائج بعد.</p>
+                      )}
+
+                      {lab.resultPdfUrl && (
+                        <a
+                          href={lab.resultPdfUrl}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="pd-btn pd-btn--ghost pd-lab-pdf-link"
+                        >
+                          <Download size={16} aria-hidden="true" />
+                          <span>تنزيل تقرير PDF</span>
+                        </a>
+                      )}
+
+                      {lab.labNotes && (
+                        <p className="pd-lab-notes" dir="auto">
+                          <strong>ملاحظات المختبر: </strong>
+                          {lab.labNotes}
+                        </p>
+                      )}
+                    </div>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // AI Assistant section
+  // ════════════════════════════════════════════════════════════════════
+
+  const INPUT_TYPE_ICONS = {
+    text:     MessageSquare,
+    image:    ImageIcon,
+    voice:    Mic,
+    combined: Sparkles,
+  };
+
+  const INPUT_TYPE_LABELS = {
+    text:     'نص',
+    image:    'صورة',
+    voice:    'صوت',
+    combined: 'مختلط',
+  };
+
+  const getLocationWithTimeout = (timeoutMs = 3000) => {
+    return new Promise((resolve) => {
+      if (!navigator.geolocation) {
+        resolve(null);
+        return;
+      }
+
+      let settled = false;
+      const timer = setTimeout(() => {
+        if (!settled) {
+          settled = true;
+          resolve(null);
+        }
+      }, timeoutMs);
+
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve({
+            lat: pos.coords.latitude,
+            lng: pos.coords.longitude,
+            accuracy: pos.coords.accuracy,
+          });
+        },
+        () => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(null);
+        },
+        { timeout: timeoutMs, maximumAge: 60000 }
+      );
+    });
+  };
+
+  const handleSpecialistSubmit = async (symptoms) => {
+    if (!symptoms?.trim()) return;
+    setSpecialistLoading(true);
+    setSpecialistError(null);
+    try {
+      const res = await patientAPI.analyzeSymptoms({ symptoms });
+      if (res?.success) {
+        setSpecialistResult(res.data || null);
+      } else {
+        setSpecialistError(res?.message || 'تعذر الحصول على النتيجة');
+      }
+    } catch (err) {
+      setSpecialistError(err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setSpecialistLoading(false);
+    }
+  };
+
+  const submitTriage = async (inputType, payload) => {
+    setTriageLoading(true);
+    setTriageError(null);
+
+    const location = await getLocationWithTimeout();
+
+    const formData = new FormData();
+    formData.append('inputType', inputType);
+    if (inputType === 'text') {
+      formData.append('textDescription', payload);
+    } else if (inputType === 'image') {
+      formData.append('image', payload);
+    }
+    if (location) {
+      formData.append('location', JSON.stringify({ lat: location.lat, lng: location.lng }));
+      formData.append('locationAccuracy', String(location.accuracy));
+    }
+
+    try {
+      const res = await patientAPI.submitEmergencyReport(formData);
+      if (res?.success) {
+        setTriageResult(res.report || null);
+        loadEmergencyReports(true);
+      } else {
+        setTriageError(res?.message || 'تعذر إرسال التقرير');
+      }
+    } catch (err) {
+      setTriageError(err?.message || 'حدث خطأ في الاتصال بالخادم');
+    } finally {
+      setTriageLoading(false);
+    }
+  };
+
+  const handleTriageTextSubmit  = (text) => submitTriage('text',  text);
+  const handleTriageImageSubmit = (file) => submitTriage('image', file);
+
+  const renderAIAssistant = () => (
+    <div className="pd-ai-assistant">
+      <div className="pd-ai-subtabs" role="tablist">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={aiActiveTab === 'specialist'}
+          className={`pd-ai-subtab${aiActiveTab === 'specialist' ? ' is-active' : ''}`}
+          onClick={() => setAiActiveTab('specialist')}
+        >
+          <Stethoscope size={16} aria-hidden="true" />
+          <span>استشارة الأخصائي</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={aiActiveTab === 'triage'}
+          className={`pd-ai-subtab${aiActiveTab === 'triage' ? ' is-active' : ''}`}
+          onClick={() => setAiActiveTab('triage')}
+        >
+          <Siren size={16} aria-hidden="true" />
+          <span>الإسعاف الأولي</span>
+        </button>
+      </div>
+
+      {aiActiveTab === 'specialist' && (
+        <div className="pd-ai-panel" role="tabpanel" aria-label="استشارة الأخصائي">
+          <div className="pd-ai-panel-intro">
+            <h3 className="pd-ai-panel-title">اختر الأخصائي المناسب لأعراضك</h3>
+            <p>
+              اكتب أعراضك وسيقترح لك المساعد الذكي نوع الطبيب المناسب
+              لحالتك. هذه النتيجة للإرشاد فقط ولا تحل محل الاستشارة
+              الطبية.
+            </p>
+          </div>
+
+          <div className="pd-ai-panel-body">
+            <div className="pd-ai-panel-input">
+              <InputText
+                value={specialistInput}
+                onChange={setSpecialistInput}
+                onSubmit={handleSpecialistSubmit}
+                placeholder="صف أعراضك بلغة واضحة، مثل: ألم في الصدر وضيق في التنفس منذ يومين..."
+                disabled={specialistLoading}
+                maxLength={2000}
+              />
+            </div>
+
+            <div className="pd-ai-panel-result">
+              <ResultCard
+                variant={specialistResult ? 'specialist' : 'empty'}
+                result={specialistResult}
+                loading={specialistLoading}
+                error={specialistError}
+              />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {aiActiveTab === 'triage' && (
+        <div className="pd-ai-panel" role="tabpanel" aria-label="الإسعاف الأولي">
+          <div className="pd-ai-panel-intro pd-ai-panel-intro--emergency">
+            <AlertTriangle size={20} aria-hidden="true" />
+            <div>
+              <h3 className="pd-ai-panel-title">الإسعاف الأولي الذكي</h3>
+              <p>
+                صف حالتك أو ارفع صورة للإصابة وسنوفر لك إرشادات الإسعاف
+                الأولي. في حالة الطوارئ الحقيقية، اتصل بالإسعاف فوراً.
+              </p>
+            </div>
+          </div>
+
+          <InputModeToggle
+            mode={triageMode}
+            onChange={setTriageMode}
+            availableModes={['text', 'image']}
+          />
+
+          <div className="pd-ai-panel-body">
+            <div className="pd-ai-panel-input">
+              {triageMode === 'text' && (
+                <InputText
+                  value={triageText}
+                  onChange={setTriageText}
+                  onSubmit={handleTriageTextSubmit}
+                  placeholder="صف الحالة — مثال: جرح في اليد ينزف منذ 5 دقائق..."
+                  disabled={triageLoading}
+                  maxLength={2000}
+                />
+              )}
+              {triageMode === 'image' && (
+                <InputImage
+                  onChange={setTriageImageFile}
+                  onSubmit={handleTriageImageSubmit}
+                  maxSizeMB={10}
+                  disabled={triageLoading}
+                  openAlert={openAlert}
+                />
+              )}
+            </div>
+
+            <div className="pd-ai-panel-result">
+              <ResultCard
+                variant={triageResult ? 'triage' : 'empty'}
+                result={triageResult}
+                loading={triageLoading}
+                error={triageError}
+              />
+            </div>
+          </div>
+
+          <section className="pd-ai-history" aria-label="السجل السابق">
+            <h3 className="pd-ai-history-title">
+              <Clock size={18} aria-hidden="true" />
+              <span>السجل السابق</span>
+            </h3>
+
+            {emergencyReportsLoading ? (
+              <LoadingSpinner message="جاري تحميل السجل..." />
+            ) : emergencyReports.length === 0 ? (
+              <EmptyState
+                icon={Clock}
+                title="لا يوجد سجل"
+                subtitle="ستظهر هنا تقاريرك السابقة بعد إرسال أول طلب."
+              />
+            ) : (
+              <ol className="pd-ai-history-list">
+                {emergencyReports.map((report) => {
+                  const InputIcon = INPUT_TYPE_ICONS[report.inputType] || MessageSquare;
+                  const typeLabel = INPUT_TYPE_LABELS[report.inputType] || report.inputType;
+                  const steps = Array.isArray(report.aiFirstAid) ? report.aiFirstAid : [];
+                  const timestamp = report.reportedAt || report.createdAt;
+
+                  return (
+                    <li key={report._id} className="pd-ai-history-item">
+                      <div className="pd-ai-history-item-icon" aria-hidden="true">
+                        <InputIcon size={18} />
+                      </div>
+                      <div className="pd-ai-history-item-body">
+                        <div className="pd-ai-history-item-top">
+                          <SeverityBadge severity={report.aiRiskLevel} />
+                          <span
+                            className="pd-ai-history-item-type"
+                            aria-label={`نوع الإدخال: ${typeLabel}`}
+                          >
+                            {typeLabel}
+                          </span>
+                          <time
+                            dateTime={timestamp}
+                            className="pd-ai-history-item-time"
+                            dir="ltr"
+                          >
+                            {formatDateTime(timestamp)}
+                          </time>
+                        </div>
+                        {report.textDescription && (
+                          <p className="pd-ai-history-item-desc" dir="auto">
+                            {report.textDescription}
+                          </p>
+                        )}
+                        {steps.length > 0 && (
+                          <details className="pd-ai-history-item-details">
+                            <summary>إظهار خطوات الإسعاف</summary>
+                            <FirstAidSteps steps={steps} />
+                          </details>
+                        )}
+                      </div>
+                    </li>
+                  );
+                })}
+              </ol>
+            )}
+          </section>
+        </div>
+      )}
     </div>
   );
-};
 
-export default PatientDashboard;
+
+  // ════════════════════════════════════════════════════════════════════
+  // Reviews section
+  // ════════════════════════════════════════════════════════════════════
+
+  const REVIEW_STATUS_LABELS = {
+    pending:  'قيد المراجعة',
+    approved: 'منشور',
+    rejected: 'مرفوض',
+    flagged:  'مُعلَّم',
+  };
+
+  const resolveReviewTarget = (review) => {
+    for (const { key, label, icon } of REVIEW_TARGETS) {
+      if (review[key]) {
+        return { label, icon, id: review[key] };
+      }
+    }
+    return { label: 'غير محدد', icon: Star, id: null };
+  };
+
+  const renderReviews = () => {
+    const openReviewForm = () => {
+      const submit = async (payload) => {
+        try {
+          const res = await patientAPI.submitReview(payload);
+          if (res?.success) {
+            closeModal();
+            openAlert(
+              'success',
+              'تم إرسال التقييم',
+              'شكراً لمشاركتك. سيتم مراجعة التقييم قبل نشره.'
+            );
+            loadReviews(true);
+          } else {
+            openAlert('error', 'تعذر إرسال التقييم', res?.message || 'حدث خطأ');
+          }
+        } catch (err) {
+          openAlert('error', 'تعذر إرسال التقييم', err?.message || 'حدث خطأ في الاتصال');
+        }
+      };
+
+      openCustomModal('إضافة تقييم', (
+        <ReviewSubmitForm
+          onCancel={closeModal}
+          onConfirm={submit}
+          submitting={false}
+        />
+      ));
+    };
+
+    return (
+      <div className="pd-reviews">
+        <div className="pd-section-toolbar">
+          <button type="button" className="pd-btn pd-btn--primary" onClick={openReviewForm}>
+            <Plus size={16} aria-hidden="true" />
+            <span>إضافة تقييم</span>
+          </button>
+        </div>
+
+        {reviewsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل التقييمات..." />
+          </div>
+        ) : reviews.length === 0 ? (
+          <EmptyState
+            icon={Star}
+            title="لا توجد تقييمات"
+            subtitle="شاركنا تجربتك مع الأطباء والمختبرات والصيدليات."
+            cta={{ label: 'إضافة أول تقييم', onClick: openReviewForm }}
+          />
+        ) : (
+          <ul className="pd-review-list">
+            {reviews.map((review) => {
+              const target = resolveReviewTarget(review);
+              const TargetIcon = target.icon;
+              const statusLabel = REVIEW_STATUS_LABELS[review.status] || review.status;
+
+              return (
+                <li key={review._id} className="pd-review-item">
+                  <div className="pd-review-item-head">
+                    <div className="pd-review-item-target">
+                      <TargetIcon size={18} aria-hidden="true" />
+                      <span>{target.label}</span>
+                      {target.id && (
+                        <span className="pd-review-item-target-id" dir="ltr">
+                          {target.id}
+                        </span>
+                      )}
+                    </div>
+                    <div className="pd-review-item-rating" aria-label={`${review.rating} من 5`}>
+                      {[1, 2, 3, 4, 5].map((n) => (
+                        <Star
+                          key={n}
+                          size={14}
+                          fill={n <= review.rating ? 'currentColor' : 'none'}
+                          aria-hidden="true"
+                        />
+                      ))}
+                    </div>
+                  </div>
+                  {review.reviewText && (
+                    <p className="pd-review-item-text" dir="auto">{review.reviewText}</p>
+                  )}
+                  <div className="pd-review-item-foot">
+                    <span className={`pd-review-status pd-review-status--${review.status}`}>
+                      {statusLabel}
+                    </span>
+                    {review.isAnonymous && (
+                      <span className="pd-review-anon">
+                        <Eye size={12} aria-hidden="true" />
+                        <span>مجهول الهوية</span>
+                      </span>
+                    )}
+                    <time dateTime={review.createdAt} dir="ltr">
+                      {formatDate(review.createdAt)}
+                    </time>
+                  </div>
+                  {review.adminNote && (
+                    <p className="pd-review-item-admin-note" dir="auto">
+                      <strong>ملاحظة الإدارة: </strong>
+                      {review.adminNote}
+                    </p>
+                  )}
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Notifications section
+  // ════════════════════════════════════════════════════════════════════
+
+  const NOTIFICATION_TYPE_META = {
+    appointment_reminder:    { icon: Calendar,      label: 'تذكير بموعد'          },
+    appointment_confirmed:   { icon: CheckCircle2,  label: 'تأكيد موعد'            },
+    appointment_cancelled:   { icon: XCircle,       label: 'إلغاء موعد'            },
+    prescription_ready:      { icon: Pill,          label: 'الوصفة جاهزة'          },
+    prescription_dispensed:  { icon: Pill,          label: 'تم صرف الوصفة'        },
+    lab_results_ready:       { icon: FlaskConical,  label: 'نتائج المختبر'         },
+    lab_results_critical:    { icon: AlertOctagon,  label: 'نتائج حرجة'            },
+    emergency_alert:         { icon: Siren,         label: 'تنبيه طارئ'             },
+    doctor_request_approved: { icon: CheckCircle2,  label: 'قُبل الطلب'            },
+    doctor_request_rejected: { icon: XCircle,       label: 'رُفض الطلب'            },
+    account_deactivated:     { icon: AlertTriangle, label: 'إلغاء تفعيل الحساب'  },
+    payment_due:             { icon: AlertCircle,   label: 'دفعة مستحقة'           },
+    system_alert:            { icon: Info,          label: 'تنبيه النظام'           },
+    general:                 { icon: Bell,          label: 'إشعار'                  },
+  };
+
+  const RELATED_TYPE_TO_SECTION = {
+    appointments:      'appointments',
+    visits:            'visits',
+    prescriptions:     'prescriptions',
+    lab_tests:         'lab-results',
+    emergency_reports: 'ai-assistant',
+  };
+
+  const handleNotificationClick = (notification) => {
+    if (notification.status !== 'read') {
+      setNotifications((prev) =>
+        prev.map((n) =>
+          n._id === notification._id
+            ? { ...n, status: 'read', readAt: new Date().toISOString() }
+            : n
+        )
+      );
+      patientAPI.markNotificationRead(notification._id).catch(() => {});
+    }
+
+    const targetSection = RELATED_TYPE_TO_SECTION[notification.relatedType];
+    if (targetSection) {
+      setActiveSection(targetSection);
+    }
+  };
+
+  const renderNotifications = () => {
+    const filtered = notifications.filter((n) =>
+      notificationFilter === 'unread' ? n.status !== 'read' : true
+    );
+
+    return (
+      <div className="pd-notifications">
+        <div className="pd-section-toolbar">
+          <div className="pd-tabs" role="tablist">
+            {[
+              { key: 'unread', label: 'غير المقروءة' },
+              { key: 'all',    label: 'الكل'          },
+            ].map(({ key, label }) => (
+              <button
+                key={key}
+                type="button"
+                role="tab"
+                aria-selected={notificationFilter === key}
+                className={`pd-tab${notificationFilter === key ? ' is-active' : ''}`}
+                onClick={() => setNotificationFilter(key)}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {notificationsLoading ? (
+          <div className="pd-section-loading">
+            <LoadingSpinner message="جاري تحميل الإشعارات..." />
+          </div>
+        ) : filtered.length === 0 ? (
+          <EmptyState
+            icon={Bell}
+            title={
+              notificationFilter === 'unread'
+                ? 'لا توجد إشعارات غير مقروءة'
+                : 'لا توجد إشعارات'
+            }
+            subtitle="ستظهر هنا التنبيهات والتذكيرات."
+          />
+        ) : (
+          <ul className="pd-notification-list">
+            {filtered.map((n) => {
+              const meta = NOTIFICATION_TYPE_META[n.type] || NOTIFICATION_TYPE_META.general;
+              const MetaIcon = meta.icon;
+              const isUnread = n.status !== 'read';
+              const isDeepLinkable = Boolean(RELATED_TYPE_TO_SECTION[n.relatedType]);
+
+              return (
+                <li
+                  key={n._id}
+                  className={`pd-notification-item${isUnread ? ' is-unread' : ''} pd-notification-item--${n.priority || 'medium'}`}
+                >
+                  <button
+                    type="button"
+                    className="pd-notification-item-btn"
+                    onClick={() => handleNotificationClick(n)}
+                  >
+                    <div
+                      className={`pd-notification-item-icon pd-notification-item-icon--${n.type || 'general'}`}
+                      aria-hidden="true"
+                    >
+                      <MetaIcon size={18} />
+                    </div>
+                    <div className="pd-notification-item-body">
+                      <div className="pd-notification-item-top">
+                        <span className="pd-notification-item-type">{meta.label}</span>
+                        {isUnread && (
+                          <span className="pd-notification-item-dot" aria-label="غير مقروءة">
+                            •
+                          </span>
+                        )}
+                      </div>
+                      <h4 className="pd-notification-item-title" dir="auto">{n.title}</h4>
+                      <p className="pd-notification-item-message" dir="auto">{n.message}</p>
+                      <div className="pd-notification-item-foot">
+                        <time dateTime={n.sentAt || n.createdAt} dir="ltr">
+                          {formatDateTime(n.sentAt || n.createdAt)}
+                        </time>
+                        {isDeepLinkable && (
+                          <span className="pd-notification-item-link-hint">
+                            <ChevronLeft size={14} aria-hidden="true" />
+                            <span>اضغط لعرض التفاصيل</span>
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Profile section
+  // ════════════════════════════════════════════════════════════════════
+
+  const GOVERNORATE_LABELS = {
+    damascus:    'دمشق',    aleppo:     'حلب',       homs:       'حمص',
+    hama:        'حماة',    latakia:    'اللاذقية',  tartus:     'طرطوس',
+    idlib:       'إدلب',    deir_ez_zor:'دير الزور',  raqqa:      'الرقة',
+    hasakah:     'الحسكة',  daraa:      'درعا',      as_suwayda: 'السويداء',
+    quneitra:    'القنيطرة', rif_dimashq:'ريف دمشق',
+  };
+
+  const renderProfile = () => {
+    const openEditForm = () => {
+      const submit = async (payload) => {
+        try {
+          const res = await patientAPI.updateMyProfile(payload);
+          if (res?.success) {
+            setProfile((prev) => ({ ...(prev || {}), ...res }));
+            closeModal();
+            openAlert('success', 'تم الحفظ', 'تم تحديث ملفك الشخصي.');
+          } else {
+            openAlert('error', 'تعذر الحفظ', res?.message || 'حدث خطأ');
+          }
+        } catch (err) {
+          openAlert('error', 'تعذر الحفظ', err?.message || 'حدث خطأ في الاتصال');
+        }
+      };
+
+      openCustomModal('تعديل الملف', (
+        <ProfileEditForm
+          profile={profile}
+          onCancel={closeModal}
+          onConfirm={submit}
+          submitting={false}
+        />
+      ), 'lg');
+    };
+
+    if (profileLoading) {
+      return (
+        <div className="pd-section-loading">
+          <LoadingSpinner message="جاري تحميل الملف الشخصي..." />
+        </div>
+      );
+    }
+    if (!profile) {
+      return (
+        <EmptyState
+          icon={User}
+          title="تعذر تحميل الملف الشخصي"
+          subtitle="يرجى إعادة المحاولة لاحقاً."
+        />
+      );
+    }
+
+    const ident   = identity || {};
+    const patient = profile.patient || {};
+    const ec      = patient.emergencyContact || {};
+    const allergies         = Array.isArray(patient.allergies)         ? patient.allergies         : [];
+    const chronicDiseases   = Array.isArray(patient.chronicDiseases)   ? patient.chronicDiseases   : [];
+    const currentMedications = Array.isArray(patient.currentMedications) ? patient.currentMedications : [];
+    const addressLine = [
+      GOVERNORATE_LABELS[ident.governorate] || ident.governorate,
+      ident.city,
+      ident.address,
+    ].filter(Boolean).join(' — ');
+
+    return (
+      <div className="pd-profile">
+        <div className="pd-section-toolbar">
+          <button type="button" className="pd-btn pd-btn--primary" onClick={openEditForm}>
+            <Edit size={16} aria-hidden="true" />
+            <span>تعديل الملف</span>
+          </button>
+        </div>
+
+        <section className="pd-card pd-profile-card">
+          <div className="pd-card-header">
+            <h3 className="pd-card-title">
+              <User size={18} aria-hidden="true" />
+              <span>المعلومات الشخصية</span>
+            </h3>
+          </div>
+          <div className="pd-card-body">
+            <dl className="pd-profile-fields">
+              <div className="pd-profile-field">
+                <dt>الاسم الكامل</dt>
+                <dd dir="auto">{fullName || '—'}</dd>
+              </div>
+              {ident.nationalId && (
+                <div className="pd-profile-field">
+                  <dt>الرقم الوطني</dt>
+                  <dd dir="ltr">{ident.nationalId}</dd>
+                </div>
+              )}
+              {ident.childRegistrationNumber && (
+                <div className="pd-profile-field">
+                  <dt>رقم تسجيل الطفل</dt>
+                  <dd dir="ltr">{ident.childRegistrationNumber}</dd>
+                </div>
+              )}
+              <div className="pd-profile-field">
+                <dt>تاريخ الميلاد</dt>
+                <dd dir="ltr">{ident.dateOfBirth ? formatDate(ident.dateOfBirth) : '—'}</dd>
+              </div>
+              <div className="pd-profile-field">
+                <dt>العمر</dt>
+                <dd dir="ltr">{age !== null ? `${age} سنة` : '—'}</dd>
+              </div>
+              <div className="pd-profile-field">
+                <dt>الجنس</dt>
+                <dd>{ident.gender === 'male' ? 'ذكر' : ident.gender === 'female' ? 'أنثى' : '—'}</dd>
+              </div>
+              <div className="pd-profile-field">
+                <dt>رقم الهاتف</dt>
+                <dd dir="ltr">{ident.phoneNumber || '—'}</dd>
+              </div>
+              <div className="pd-profile-field pd-profile-field--email">
+                <dt>
+                  <span>البريد الإلكتروني</span>
+                  <Lock
+                    className="pd-profile-email-lock"
+                    size={12}
+                    aria-label="لا يمكن تغيير البريد الإلكتروني في هذا الإصدار"
+                  />
+                </dt>
+                <dd dir="ltr">{ident.email || '—'}</dd>
+              </div>
+              <div className="pd-profile-field">
+                <dt>العنوان</dt>
+                <dd dir="auto">{addressLine || '—'}</dd>
+              </div>
+            </dl>
+          </div>
+        </section>
+
+        {isMinor && profile.child && (profile.child.guardianName || profile.child.schoolName) && (
+          <section className="pd-card pd-profile-card">
+            <div className="pd-card-header">
+              <h3 className="pd-card-title">
+                <Baby size={18} aria-hidden="true" />
+                <span>معلومات الولي والمدرسة</span>
+              </h3>
+            </div>
+            <div className="pd-card-body">
+              <dl className="pd-profile-fields">
+                {profile.child.guardianName && (
+                  <div className="pd-profile-field">
+                    <dt>اسم الوصي</dt>
+                    <dd dir="auto">{profile.child.guardianName}</dd>
+                  </div>
+                )}
+                {profile.child.guardianRelationship && (
+                  <div className="pd-profile-field">
+                    <dt>صلة القرابة</dt>
+                    <dd dir="auto">{profile.child.guardianRelationship}</dd>
+                  </div>
+                )}
+                {profile.child.schoolName && (
+                  <div className="pd-profile-field">
+                    <dt><GraduationCap size={14} aria-hidden="true" /> المدرسة</dt>
+                    <dd dir="auto">{profile.child.schoolName}</dd>
+                  </div>
+                )}
+                {profile.child.grade && (
+                  <div className="pd-profile-field">
+                    <dt>الصف</dt>
+                    <dd dir="auto">{profile.child.grade}</dd>
+                  </div>
+                )}
+              </dl>
+            </div>
+          </section>
+        )}
+
+        <section className="pd-card pd-profile-card">
+          <div className="pd-card-header">
+            <h3 className="pd-card-title">
+              <HeartPulse size={18} aria-hidden="true" />
+              <span>المعلومات الطبية</span>
+            </h3>
+          </div>
+          <div className="pd-card-body">
+            <dl className="pd-profile-fields">
+              <div className="pd-profile-field">
+                <dt><Droplet size={14} aria-hidden="true" /> فصيلة الدم</dt>
+                <dd dir="ltr">
+                  {bloodType === 'unknown' ? 'غير معروفة' : (bloodType || '—')}
+                </dd>
+              </div>
+              {patient.height && (
+                <div className="pd-profile-field">
+                  <dt>الطول</dt>
+                  <dd dir="ltr">{patient.height} سم</dd>
+                </div>
+              )}
+              {patient.weight && (
+                <div className="pd-profile-field">
+                  <dt>الوزن</dt>
+                  <dd dir="ltr">{patient.weight} كغ</dd>
+                </div>
+              )}
+              {patient.bmi && (
+                <div className="pd-profile-field">
+                  <dt>مؤشر الكتلة</dt>
+                  <dd dir="ltr">{Number(patient.bmi).toFixed(1)}</dd>
+                </div>
+              )}
+              {medicalCardNumber && (
+                <div className="pd-profile-field">
+                  <dt><CreditCard size={14} aria-hidden="true" /> البطاقة الطبية</dt>
+                  <dd dir="ltr">{medicalCardNumber}</dd>
+                </div>
+              )}
+            </dl>
+            {allergies.length > 0 && (
+              <div className="pd-profile-tags">
+                <h4>الحساسية</h4>
+                <ul>
+                  {allergies.map((a, i) => (
+                    <li key={i} className="pd-profile-tag pd-profile-tag--warning" dir="auto">{a}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {chronicDiseases.length > 0 && (
+              <div className="pd-profile-tags">
+                <h4>الأمراض المزمنة</h4>
+                <ul>
+                  {chronicDiseases.map((d, i) => (
+                    <li key={i} className="pd-profile-tag" dir="auto">{d}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+            {currentMedications.length > 0 && (
+              <div className="pd-profile-tags">
+                <h4>الأدوية الحالية</h4>
+                <ul>
+                  {currentMedications.map((m, i) => (
+                    <li key={i} className="pd-profile-tag" dir="auto">{m}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
+          </div>
+        </section>
+
+        <section className="pd-card pd-profile-card">
+          <div className="pd-card-header">
+            <h3 className="pd-card-title">
+              <Phone size={18} aria-hidden="true" />
+              <span>جهة الاتصال في حالة الطوارئ</span>
+            </h3>
+          </div>
+          <div className="pd-card-body">
+            {ec.name || ec.phoneNumber ? (
+              <dl className="pd-profile-fields">
+                {ec.name && (
+                  <div className="pd-profile-field"><dt>الاسم</dt><dd dir="auto">{ec.name}</dd></div>
+                )}
+                {ec.relationship && (
+                  <div className="pd-profile-field"><dt>صلة القرابة</dt><dd dir="auto">{ec.relationship}</dd></div>
+                )}
+                {ec.phoneNumber && (
+                  <div className="pd-profile-field"><dt>الهاتف</dt><dd dir="ltr">{ec.phoneNumber}</dd></div>
+                )}
+                {ec.alternativePhoneNumber && (
+                  <div className="pd-profile-field"><dt>هاتف بديل</dt><dd dir="ltr">{ec.alternativePhoneNumber}</dd></div>
+                )}
+              </dl>
+            ) : (
+              <p className="pd-profile-empty-contact">
+                لم تتم إضافة جهة اتصال للطوارئ بعد. اضغط "تعديل الملف" لإضافتها.
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+    );
+  };
+
+
+  // ════════════════════════════════════════════════════════════════════
+  // Section dispatcher + modal content renderer + shell
+  // ════════════════════════════════════════════════════════════════════
+
+  const renderActiveSection = () => {
+    switch (activeSection) {
+      case 'home':          return renderHome();
+      case 'appointments':  return renderAppointments();
+      case 'visits':        return renderVisits();
+      case 'prescriptions': return renderPrescriptions();
+      case 'lab-results':   return renderLabTests();
+      case 'ai-assistant':  return renderAIAssistant();
+      case 'reviews':       return renderReviews();
+      case 'notifications': return renderNotifications();
+      case 'profile':       return renderProfile();
+      default:              return renderHome();
+    }
+  };
+
+  const renderModalContent = () => {
+    if (modal.type === 'custom') return modal.content;
+
+    const VariantIcon =
+      modal.variant === 'success' ? CheckCircle2
+      : modal.variant === 'error'   ? XCircle
+      : modal.variant === 'warning' ? AlertTriangle
+      : Info;
+
+    const confirmClass =
+      modal.type === 'confirm' && (modal.variant === 'warning' || modal.variant === 'error')
+        ? 'pd-btn pd-btn--danger'
+        : 'pd-btn pd-btn--primary';
+
+    return (
+      <>
+        <div className={`pd-modal-header pd-modal-header--${modal.variant}`}>
+          <VariantIcon size={20} aria-hidden="true" />
+          <h3 className="pd-modal-title" dir="auto">{modal.title}</h3>
+          <button type="button" className="pd-modal-close" onClick={closeModal} aria-label="إغلاق">
+            <X size={18} aria-hidden="true" />
+          </button>
+        </div>
+        <div className="pd-modal-body">
+          <p className="pd-modal-message" dir="auto">{modal.message}</p>
+        </div>
+        <div className="pd-modal-footer">
+          {modal.type === 'confirm' && (
+            <button type="button" className="pd-btn pd-btn--ghost" onClick={closeModal}>
+              {modal.cancelLabel}
+            </button>
+          )}
+          <button
+            type="button"
+            className={confirmClass}
+            onClick={() => {
+              if (modal.type === 'confirm' && typeof modal.onConfirm === 'function') {
+                modal.onConfirm();
+              }
+              closeModal();
+            }}
+          >
+            {modal.confirmLabel}
+          </button>
+        </div>
+      </>
+    );
+  };
+
+  return (
+    <div className="pd-layout" dir="rtl">
+      {renderSidebar()}
+
+      <div className="pd-main-wrap">
+        {renderPageHeader()}
+
+        <main className="pd-main" role="main">
+          {renderActiveSection()}
+        </main>
+      </div>
+
+      <Modal isOpen={modal.isOpen} onClose={closeModal} size={modal.size}>
+        {renderModalContent()}
+      </Modal>
+    </div>
+  );
+}
