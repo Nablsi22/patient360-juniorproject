@@ -1,168 +1,180 @@
-// backend/middleware/auditLog.js
-// FIXED Audit Log Middleware - Matches AuditLog Model
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Audit Log Middleware — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  HTTP-level audit logging middleware. Wraps a route handler and creates
+ *  an audit log entry after the response is sent.
+ *
+ *  This is OPTIONAL middleware. The new controllers (in B1–B6) call
+ *  AuditLog.record() directly inside their handlers — that's the preferred
+ *  pattern because it gives the controller full context (which entity was
+ *  affected, what the operation accomplished, etc.).
+ *
+ *  This middleware exists for routes that don't need that level of detail
+ *  and just want a "this endpoint was called by user X" log. Use sparingly.
+ *
+ *  Usage:
+ *    const { auditLog } = require('../middleware/auditLog');
+ *    router.get('/sensitive', protect, auditLog('VIEW_SENSITIVE_DATA'), handler);
+ *
+ *  ⚠️  Critical fixes vs. previous version:
+ *    - patientId → patientPersonId / patientChildId (locked schema requires
+ *      the dual-ref pattern, the old field name was silently rejected)
+ *    - Resource types are now lowercase (visit, prescription, etc.) to match
+ *      the schema documentation. Capitalized values failed validation silently.
+ *    - Uses AuditLog.record() static method which never throws —
+ *      old AuditLog.create() in a .catch() chain was cluttering error logs.
+ *    - Removed the getAuditLogs / getUserAuditLogs functions — those belong
+ *      in adminController.js (which already has them).
+ *
+ *  Conventions kept:
+ *    - Non-blocking — never delays the response
+ *    - Never throws — audit failures must not break the user's request
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
-const AuditLog = require('../models/AuditLog');
+const { AuditLog } = require('../models');
+
+// ============================================================================
+// HELPER: Map action verb to lowercase resource type
+// ============================================================================
+
 
 /**
- * Map action names to resource types
- * This fixes the mismatch between action and resourceType
+ * Infer the resource type from the action verb string.
+ * Matches the lowercase enum values the AuditLog schema expects.
+ *
+ * @param {string} action - e.g., 'CREATE_PRESCRIPTION', 'VIEW_PATIENT'
+ * @returns {string} lowercase resource type
  */
-function getResourceTypeFromAction(action) {
-  // Doctor actions
-  if (action.includes('DOCTOR_REQUEST')) return 'DoctorRequest';
-  if (action.includes('DOCTOR')) return 'Doctor';
-  
-  // Patient actions
-  if (action.includes('PATIENT')) return 'Patient';
-  
-  // Visit actions
-  if (action.includes('VISIT')) return 'Visit';
-  
-  // Statistics actions
-  if (action.includes('STATISTICS')) return 'Statistics';
-  
-  // Audit actions
-  if (action.includes('AUDIT')) return 'AuditLog';
-  
-  // Account actions
-  if (action.includes('LOGIN') || action.includes('PASSWORD') || action.includes('LOGOUT')) return 'Account';
-  
-  // Default
-  return 'Other';
+function inferResourceType(action) {
+  const upper = (action || '').toUpperCase();
+
+  // Order matters — most specific first
+  if (upper.includes('DOCTOR_REQUEST')) return 'doctor_request';
+  if (upper.includes('PRESCRIPTION'))   return 'prescription';
+  if (upper.includes('DISPENSING'))     return 'pharmacy_dispensing';
+  if (upper.includes('LAB_TEST'))       return 'lab_test';
+  if (upper.includes('LAB_SAMPLE'))     return 'lab_test';
+  if (upper.includes('LAB_PDF'))        return 'lab_test';
+  if (upper.includes('LAB_RESULTS'))    return 'lab_test';
+  if (upper.includes('APPOINTMENT'))    return 'appointment';
+  if (upper.includes('SLOT'))           return 'availability_slot';
+  if (upper.includes('VISIT'))          return 'visit';
+  if (upper.includes('EMERGENCY'))      return 'emergency_report';
+  if (upper.includes('AMBULANCE'))      return 'emergency_report';
+  if (upper.includes('NOTIFICATION'))   return 'notification';
+  if (upper.includes('MEDICATION'))     return 'medication';
+  if (upper.includes('INVENTORY'))      return 'pharmacy_inventory';
+  if (upper.includes('DOCTOR'))         return 'doctor';
+  if (upper.includes('PATIENT'))        return 'patient';
+  if (upper.includes('PHARMACY'))       return 'pharmacy';
+  if (upper.includes('LABORATORY'))     return 'laboratory';
+  if (upper.includes('HOSPITAL'))       return 'hospital';
+  if (upper.includes('STATISTICS'))     return 'admin';
+  if (upper.includes('AUDIT'))          return 'audit';
+  if (upper.includes('LOGIN'))          return 'account';
+  if (upper.includes('LOGOUT'))         return 'account';
+  if (upper.includes('PASSWORD'))       return 'account';
+  if (upper.includes('SIGNUP'))         return 'account';
+
+  return 'other';
 }
 
 /**
- * Audit Log Middleware
- * Creates audit logs for admin actions
+ * Determine which platform a request came from based on user-agent.
+ * Used for audit metadata so admins can see "this was a mobile vs web call".
+ */
+function inferPlatform(userAgent) {
+  if (!userAgent) return 'api';
+  const ua = userAgent.toLowerCase();
+  if (ua.includes('expo') || ua.includes('reactnative')) return 'mobile_app';
+  if (ua.includes('mozilla') || ua.includes('chrome') || ua.includes('safari')) return 'web';
+  return 'api';
+}
+
+// ============================================================================
+// MAIN MIDDLEWARE
+// ============================================================================
+
+/**
+ * Create an audit log middleware that records this endpoint's invocation.
+ *
+ * Wraps the response.json() method so the audit entry is created after the
+ * response is sent (success or failure both captured).
+ *
+ * @param {string} action - The action name (uppercase, e.g. 'VIEW_PATIENT')
+ * @returns {Function} Express middleware
+ *
+ * @example
+ *   router.get('/patient/:id', protect, auditLog('VIEW_PATIENT'), handler);
  */
 exports.auditLog = (action) => {
-  return async (req, res, next) => {
-    // Store original res.json to intercept response
+  return (req, res, next) => {
+    // Save the original res.json so we can wrap it
     const originalJson = res.json.bind(res);
-    
-    // Override res.json to capture response
-    res.json = function(body) {
-      // Get the correct resourceType based on action
-      const resourceType = getResourceTypeFromAction(action);
-      
-      // Create audit log entry
-      const logEntry = {
-        userId: req.user?._id || req.user?.accountId,
-        action: action,
-        description: `${action} performed by ${req.user?.email || 'unknown'}`,
-        resourceType: resourceType,  // ✅ FIXED: Maps action to resource type
-        resourceId: req.params.id || null,
-        patientId: req.params.patientId || null,
-        ipAddress: req.ip || req.connection.remoteAddress,
+
+    res.json = function (body) {
+      // Send the response FIRST so the user isn't blocked by audit logging
+      const response = originalJson(body);
+
+      // Build the audit entry
+      const success = body && body.success !== false;
+      const errorMessage = !success ? (body && body.message) : undefined;
+
+      // Map URL params → dual-ref patient fields
+      // Routes can use any of these param names depending on their style
+      let patientPersonId;
+      let patientChildId;
+
+      if (req.params.patientPersonId) {
+        patientPersonId = req.params.patientPersonId;
+      } else if (req.params.patientChildId) {
+        patientChildId = req.params.patientChildId;
+      } else if (req.targetPatient) {
+        // Set by routes/patient.js verifyPatientAccess middleware
+        patientPersonId = req.targetPatient.patientPersonId;
+        patientChildId = req.targetPatient.patientChildId;
+      }
+
+      const entry = {
+        userId: req.account?._id || req.user?._id,
+        userEmail: req.account?.email || req.user?.email,
+        userRole: (req.account?.roles || req.user?.roles || []).join(','),
+        action,
+        description: `${action} by ${req.account?.email || 'anonymous'}`,
+        resourceType: inferResourceType(action),
+        resourceId: req.params.id || undefined,
+        patientPersonId,
+        patientChildId,
+        ipAddress: req.ip || req.connection?.remoteAddress || 'unknown',
         userAgent: req.get('user-agent'),
-        success: body.success !== false,
-        errorMessage: body.success === false ? body.message : null,
+        platform: inferPlatform(req.get('user-agent')),
+        success,
+        errorMessage,
         metadata: {
           method: req.method,
           endpoint: req.originalUrl,
           query: req.query,
-          params: req.params
-        },
-        timestamp: new Date()
+          // Don't log body — could contain passwords, OTPs, sensitive data
+          paramKeys: Object.keys(req.params)
+        }
       };
 
-      // Save audit log asynchronously (don't block response)
-      AuditLog.create(logEntry)
-        .then(() => {
-          // Success - log created
-        })
-        .catch(err => {
-          console.error('Failed to create audit log:', err);
-        });
+      // Use the model's record() helper — never throws, fire and forget
+      AuditLog.record(entry);
 
-      // Send original response
-      return originalJson(body);
+      return response;
     };
 
-    next();
+    return next();
   };
 };
 
-/**
- * Get audit logs for admin
- */
-exports.getAuditLogs = async (req, res) => {
-  try {
-    const { userId, action, startDate, endDate, page = 1, limit = 50 } = req.query;
+// ============================================================================
+// EXPORT
+// ============================================================================
 
-    // Build query
-    const query = {};
-    
-    if (userId) {
-      query.userId = userId;
-    }
-    
-    if (action) {
-      query.action = action;
-    }
-    
-    if (startDate || endDate) {
-      query.timestamp = {};
-      if (startDate) query.timestamp.$gte = new Date(startDate);
-      if (endDate) query.timestamp.$lte = new Date(endDate);
-    }
-
-    // Get logs with pagination
-    const logs = await AuditLog.find(query)
-      .sort({ timestamp: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .populate('userId', 'email')
-      .select('-__v')
-      .lean();
-
-    const count = await AuditLog.countDocuments(query);
-
-    res.status(200).json({
-      success: true,
-      count,
-      page: Number(page),
-      pages: Math.ceil(count / limit),
-      logs
-    });
-  } catch (error) {
-    console.error('Error fetching audit logs:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء جلب سجلات التدقيق'
-    });
-  }
-};
-
-/**
- * Get audit logs for a specific user
- */
-exports.getUserAuditLogs = async (req, res) => {
-  try {
-    const { userId } = req.params;
-    const { page = 1, limit = 50 } = req.query;
-
-    const logs = await AuditLog.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(limit * 1)
-      .skip((page - 1) * limit)
-      .select('-__v')
-      .lean();
-
-    const count = await AuditLog.countDocuments({ userId });
-
-    res.status(200).json({
-      success: true,
-      count,
-      page: Number(page),
-      pages: Math.ceil(count / limit),
-      logs
-    });
-  } catch (error) {
-    console.error('Error fetching user audit logs:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء جلب سجلات المستخدم'
-    });
-  }
-};
+// Default export for backwards compatibility with code that does
+// `const auditLog = require('../middleware/auditLog')`
+module.exports.default = exports.auditLog;

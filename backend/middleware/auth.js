@@ -1,243 +1,259 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Authentication & Authorization Middleware — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Two middleware functions:
+ *
+ *    1. protect(req, res, next)
+ *       - Verifies the JWT token from the Authorization header
+ *       - Loads the matching Account from the database
+ *       - Rejects if account is deactivated, locked, or token invalid
+ *       - Attaches req.account and req.user (legacy alias) to the request
+ *
+ *    2. authorize(...allowedRoles)
+ *       - Used after protect() to restrict by role
+ *       - Example: router.get('/admin', protect, authorize('admin'), handler)
+ *
+ *  Conventions kept from existing code:
+ *    - Arabic error messages
+ *    - { success, message } response shape
+ *    - Try/catch in every async function
+ *    - Console.log debug markers with emojis
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
 const jwt = require('jsonwebtoken');
-const Account = require('../models/Account');
-const Person = require('../models/Person');
-const Patient = require('../models/Patient');
+const { Account } = require('../models');
+
+// ============================================================================
+// PROTECT MIDDLEWARE — verifies JWT and loads the user
+// ============================================================================
 
 /**
- * Enhanced Authentication Middleware
- * Protects routes and verifies JWT tokens
+ * Verify the request's JWT token and attach the matching Account to req.
+ * Rejects with 401 if the token is missing, invalid, or expired.
+ * Rejects with 403 if the account is deactivated or temporarily locked.
+ *
+ * On success, the following are attached to req:
+ *   - req.account      — full Account document
+ *   - req.user         — alias for req.account (kept for backwards compat)
+ *
+ * @route  Used as middleware on every protected route
+ * @access Public middleware (rejects unauthenticated requests)
  */
 exports.protect = async (req, res, next) => {
   try {
+    // ── 1. EXTRACT TOKEN FROM Authorization HEADER ────────────────────────
     let token;
+    const authHeader = req.headers.authorization;
 
-    // 1. Check if token exists in headers
-    if (req.headers.authorization && req.headers.authorization.startsWith('Bearer')) {
-      token = req.headers.authorization.split(' ')[1];
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      // Format: "Bearer eyJhbGc..."
+      token = authHeader.split(' ')[1];
     }
 
     if (!token) {
+      console.log('❌ AUTH: No token provided');
       return res.status(401).json({
         success: false,
-        message: 'غير مصرح. الرجاء تسجيل الدخول للوصول إلى هذا المورد'
+        message: 'غير مصرح. يجب تسجيل الدخول أولاً'
       });
     }
 
-    // 2. Verify token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-
-    // 3. Check if account still exists
-    const account = await Account.findById(decoded.id).select('+password');
-    
-    if (!account) {
-      return res.status(401).json({
-        success: false,
-        message: 'الحساب المرتبط بهذا الرمز لم يعد موجوداً'
-      });
-    }
-
-    // 4. Check if account is active
-    if (!account.isActive) {
-      return res.status(401).json({
-        success: false,
-        message: 'الحساب معطل. الرجاء التواصل مع الإدارة'
-      });
-    }
-
-    // 5. Check if account is locked
-    if (account.lockUntil && account.lockUntil > Date.now()) {
-      const minutesLeft = Math.ceil((account.lockUntil - Date.now()) / 60000);
-      return res.status(401).json({
-        success: false,
-        message: `الحساب مقفل. حاول مرة أخرى بعد ${minutesLeft} دقيقة`
-      });
-    }
-
-    // 6. Get person and patient data
-    const person = await Person.findById(account.personId);
-    
-    if (!person) {
-      return res.status(401).json({
-        success: false,
-        message: 'بيانات المستخدم غير موجودة'
-      });
-    }
-
-    // 7. Attach user data to request
-    req.user = {
-      accountId: account._id,
-      personId: person._id,
-      email: account.email,
-      roles: account.roles,
-      firstName: person.firstName,
-      lastName: person.lastName,
-      nationalId: person.nationalId,
-      phoneNumber: person.phoneNumber
-    };
-
-    // 8. If user is a patient, get patient ID
-    if (account.roles.includes('patient')) {
-      const patient = await Patient.findOne({ personId: person._id });
-      if (patient) {
-        req.user.patientId = patient._id;
-      }
-    }
-
-    next();
-  } catch (error) {
-    console.error('Authentication Error:', error);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({
-        success: false,
-        message: 'رمز غير صالح. الرجاء تسجيل الدخول مرة أخرى'
-      });
-    }
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({
-        success: false,
-        message: 'انتهت صلاحية الرمز. الرجاء تسجيل الدخول مرة أخرى'
-      });
-    }
-
-    return res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء التحقق من الصلاحيات'
-    });
-  }
-};
-
-/**
- * Restrict access to specific roles
- * Usage: restrictTo('patient', 'doctor')
- */
-exports.restrictTo = (...roles) => {
-  return (req, res, next) => {
-    // Check if user has at least one of the required roles
-    const hasRole = req.user.roles.some(role => roles.includes(role));
-    
-    if (!hasRole) {
-      return res.status(403).json({
-        success: false,
-        message: 'ليس لديك صلاحية للوصول إلى هذا المورد'
-      });
-    }
-    
-    next();
-  };
-};
-
-/**
- * CRITICAL SECURITY: Verify patient can only access their own data
- * Prevents patients from accessing other patients' data
- */
-exports.verifyPatientOwnership = async (req, res, next) => {
-  try {
-    // This middleware should only be used after protect middleware
-    if (!req.user) {
-      return res.status(401).json({
-        success: false,
-        message: 'المستخدم غير مصادق عليه'
-      });
-    }
-
-    // If user is not a patient, they shouldn't be accessing patient endpoints
-    if (!req.user.roles.includes('patient')) {
-      return res.status(403).json({
-        success: false,
-        message: 'هذا المورد متاح للمرضى فقط'
-      });
-    }
-
-    // Ensure patient ID exists
-    if (!req.user.patientId) {
-      return res.status(404).json({
-        success: false,
-        message: 'بيانات المريض غير موجودة'
-      });
-    }
-
-    // If route has patientId parameter, verify it matches logged-in patient
-    if (req.params.patientId && req.params.patientId !== req.user.patientId.toString()) {
-      // CRITICAL: Patient trying to access another patient's data!
-      console.warn(`⚠️ SECURITY ALERT: Patient ${req.user.patientId} attempted to access data of patient ${req.params.patientId}`);
-      
-      return res.status(403).json({
-        success: false,
-        message: 'غير مصرح لك بالوصول إلى بيانات مريض آخر'
-      });
-    }
-
-    // If route has visitId, verify the visit belongs to this patient
-    if (req.params.visitId) {
-      const Visit = require('../models/Visit');
-      const visit = await Visit.findById(req.params.visitId);
-      
-      if (!visit) {
-        return res.status(404).json({
-          success: false,
-          message: 'الزيارة غير موجودة'
-        });
-      }
-      
-      if (visit.patientId.toString() !== req.user.patientId.toString()) {
-        console.warn(`⚠️ SECURITY ALERT: Patient ${req.user.patientId} attempted to access visit ${req.params.visitId} belonging to patient ${visit.patientId}`);
-        
-        return res.status(403).json({
-          success: false,
-          message: 'غير مصرح لك بالوصول إلى بيانات هذه الزيارة'
-        });
-      }
-    }
-
-    // All checks passed
-    next();
-  } catch (error) {
-    console.error('Ownership Verification Error:', error);
-    return res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء التحقق من الصلاحيات'
-    });
-  }
-};
-
-/**
- * Optional: Verify if user owns a specific resource
- * Can be extended for other resource types
- */
-exports.verifyResourceOwnership = (resourceType) => {
-  return async (req, res, next) => {
+    // ── 2. VERIFY TOKEN SIGNATURE & EXPIRY ────────────────────────────────
+    let decoded;
     try {
-      const resourceId = req.params[`${resourceType}Id`];
-      
-      if (!resourceId) {
-        return next();
-      }
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtError) {
+      console.log('❌ AUTH: Token verification failed:', jwtError.name);
 
-      // Add custom ownership checks based on resource type
-      switch (resourceType) {
-        case 'patient':
-          if (resourceId !== req.user.patientId.toString()) {
-            return res.status(403).json({
-              success: false,
-              message: 'غير مصرح لك بالوصول إلى هذا المورد'
-            });
-          }
-          break;
-        
-        // Add more resource types as needed
-        default:
-          break;
+      // Distinguish expired vs invalid for better UX
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(401).json({
+          success: false,
+          message: 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مرة أخرى'
+        });
       }
+      return res.status(401).json({
+        success: false,
+        message: 'رمز الوصول غير صالح'
+      });
+    }
 
-      next();
-    } catch (error) {
-      console.error('Resource Ownership Verification Error:', error);
+    // ── 3. LOAD ACCOUNT FROM DATABASE ──────────────────────────────────────
+    // Note: password is select:false in the schema, so it's NOT loaded here.
+    // That's correct — we don't need the password to verify a token.
+    const account = await Account.findById(decoded.id);
+
+    if (!account) {
+      console.log('❌ AUTH: Account no longer exists for token');
+      return res.status(401).json({
+        success: false,
+        message: 'الحساب غير موجود'
+      });
+    }
+
+    // ── 4. CHECK ACCOUNT IS ACTIVE ────────────────────────────────────────
+    // Deactivated accounts cannot make API calls even with a valid token.
+    if (!account.isActive) {
+      console.log('❌ AUTH: Account is deactivated:', account.email);
+      return res.status(403).json({
+        success: false,
+        message: 'الحساب غير مفعّل. الرجاء التواصل مع الإدارة'
+      });
+    }
+
+    // ── 5. CHECK ACCOUNT IS NOT TEMPORARILY LOCKED ────────────────────────
+    // accountLockedUntil is set after 5 failed login attempts.
+    // The new Account model has an isLocked() instance method we can use.
+    if (account.isLocked()) {
+      console.log('❌ AUTH: Account is locked until', account.accountLockedUntil);
+      const minutesLeft = Math.ceil(
+        (account.accountLockedUntil - new Date()) / 60000
+      );
+      return res.status(403).json({
+        success: false,
+        message: `الحساب مغلق مؤقتاً. حاول مرة أخرى بعد ${minutesLeft} دقيقة`
+      });
+    }
+
+    // ── 6. ATTACH TO REQUEST OBJECT ───────────────────────────────────────
+    // Both req.account (new convention) and req.user (legacy alias) so
+    // existing controllers that use req.user keep working.
+    req.account = account;
+    req.user = account;
+
+    console.log('✅ AUTH: Authenticated', account.email, 'roles:', account.roles);
+    return next();
+
+  } catch (error) {
+    console.error('❌ AUTH ERROR:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في التحقق من الجلسة'
+    });
+  }
+};
+
+// ============================================================================
+// AUTHORIZE MIDDLEWARE — restricts route by role
+// ============================================================================
+
+/**
+ * Restrict a route to specific roles. Must be used AFTER protect().
+ *
+ * Usage:
+ *   router.get('/doctors', protect, authorize('admin'), handler);
+ *   router.post('/visits', protect, authorize('doctor', 'admin'), handler);
+ *
+ * @param {...string} allowedRoles - one or more role names from:
+ *   patient | doctor | admin | pharmacist | lab_technician | dentist
+ * @returns Express middleware function
+ */
+exports.authorize = (...allowedRoles) => {
+  return (req, res, next) => {
+    // protect() must have run first
+    if (!req.account) {
+      console.log('❌ AUTHORIZE: req.account missing — protect() not called?');
       return res.status(500).json({
         success: false,
-        message: 'حدث خطأ أثناء التحقق من الصلاحيات'
+        message: 'خطأ في إعداد الصلاحيات'
       });
     }
+
+    // Account.roles is an array (a user can have multiple roles)
+    // Check if any of the user's roles is in the allowed list
+    const userRoles = req.account.roles || [];
+    const hasPermission = userRoles.some(role => allowedRoles.includes(role));
+
+    if (!hasPermission) {
+      console.log(
+        '❌ AUTHORIZE: Role denied. User has [%s], needs one of [%s]',
+        userRoles.join(', '),
+        allowedRoles.join(', ')
+      );
+      return res.status(403).json({
+        success: false,
+        message: 'ليس لديك صلاحية للوصول لهذا المورد'
+      });
+    }
+
+    console.log('✅ AUTHORIZE: Role check passed for', req.account.email);
+    return next();
   };
 };
+
+// ============================================================================
+// OPTIONAL AUTH — for routes that work both logged-in and anonymously
+// ============================================================================
+
+/**
+ * Like protect() but doesn't fail if no token is provided. Used for routes
+ * that personalize their response when the user is logged in but still
+ * work for anonymous visitors (e.g. public doctor list).
+ *
+ * On no token: req.account = null, calls next()
+ * On valid token: same as protect()
+ * On invalid/expired token: req.account = null, calls next() (no error)
+ */
+exports.optionalAuth = async (req, res, next) => {
+  try {
+    let token;
+    const authHeader = req.headers.authorization;
+
+    if (authHeader && authHeader.startsWith('Bearer ')) {
+      token = authHeader.split(' ')[1];
+    }
+
+    if (!token) {
+      // No token = anonymous request, that's OK
+      req.account = null;
+      req.user = null;
+      return next();
+    }
+
+    try {
+      const decoded = jwt.verify(token, process.env.JWT_SECRET);
+      const account = await Account.findById(decoded.id);
+
+      // Only attach if account exists, is active, and not locked
+      if (account && account.isActive && !account.isLocked()) {
+        req.account = account;
+        req.user = account;
+      } else {
+        req.account = null;
+        req.user = null;
+      }
+    } catch (jwtError) {
+      // Invalid token — treat as anonymous, don't fail
+      req.account = null;
+      req.user = null;
+    }
+
+    return next();
+
+  } catch (error) {
+    console.error('❌ OPTIONAL AUTH ERROR:', error);
+    // Even on error, continue as anonymous
+    req.account = null;
+    req.user = null;
+    return next();
+  }
+};
+
+// ============================================================================
+// BACKWARDS-COMPATIBILITY ALIASES
+// ============================================================================
+//
+// Some pre-refactor route files still use the OLD function names. Rather
+// than editing every old route file individually, we expose the new
+// functions under their old names too. Both work identically.
+//
+// Old name        →  New name
+// ────────────────────────────
+// restrictTo()    →  authorize()
+//
+// Safe to keep these aliases indefinitely. They have zero runtime cost.
+// ============================================================================
+
+exports.restrictTo = exports.authorize;

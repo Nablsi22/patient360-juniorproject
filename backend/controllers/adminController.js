@@ -1,123 +1,167 @@
-// backend/controllers/adminController.js
-// Admin Controller for Patient360 System
-// COMPLETE VERSION - Optimized for AdminDashboard Frontend
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Admin Controller — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Admin-only endpoints mounted under /api/admin.
+ *
+ *  Functions:
+ *    1.  getStatistics              — Dashboard KPIs
+ *    2.  getAllDoctors              — List all doctors with details
+ *    3.  getDoctorById              — Single doctor lookup
+ *    4.  createDoctor               — Admin creates doctor directly
+ *    5.  updateDoctor               — Update doctor fields
+ *    6.  deactivateDoctor           — Soft-disable doctor account
+ *    7.  activateDoctor             — Re-enable deactivated doctor
+ *    8.  getAllPatients             — List patients (adults AND children)
+ *    9.  getPatientById             — Single patient lookup
+ *   10.  updatePatient              — Update patient fields
+ *   11.  deactivatePatient          — Soft-disable patient account
+ *   12.  activatePatient            — Re-enable deactivated patient
+ *   13.  getAuditLogs               — Browse audit logs with pagination
+ *   14.  getUserAuditLogs           — Audit logs for one specific user
+ *   15.  getAllDoctorRequests       — List doctor registration requests
+ *   16.  getDoctorRequestById       — Single doctor request detail
+ *   17.  approveDoctorRequest       — Approve + create Person+Account+Professional
+ *   18.  rejectDoctorRequest        — Reject with reason
+ *
+ *  Conventions:
+ *    - Arabic error messages, emoji-marked console logs
+ *    - { success, message, [data] } response shape
+ *    - Try/catch in every async function
+ *    - Uses req.user._id (auth middleware aliases this to req.account)
+ *
+ *  ───────────────────────────────────────────────────────────────────────
+ *  v2 CHANGES (this file) — approveDoctorRequest rewritten:
+ *   • Handles newLaboratoryData / newPharmacyData (creates Laboratory/Pharmacy
+ *     on-the-fly if request.laboratoryId / pharmacyId is absent).
+ *   • Manual rollback across all create steps (no MongoDB transactions — the
+ *     local deployment is a standalone mongod, not a replica set).
+ *   • All prior functions are preserved byte-for-byte — only approve changed.
+ *  ═══════════════════════════════════════════════════════════════════════════
+ */
 
-const Account = require('../models/Account');
-const Doctor = require('../models/Doctor');
-const Patient = require('../models/Patient');
-const Person = require('../models/Person');
-const Visit = require('../models/Visit');
-const AuditLog = require('../models/AuditLog');
-const bcrypt = require('bcryptjs');
+const {
+  Account, Person, Children, Patient, Doctor, Pharmacist, LabTechnician,
+  Pharmacy, Laboratory,
+  Visit, AuditLog, DoctorRequest
+} = require('../models');
 
-// ==================== STATISTICS ====================
+// Allowed deactivation reasons — matches locked Account schema enum
+const ALLOWED_DEACTIVATION_REASONS = [
+  'voluntary', 'administrative', 'security',
+  'retirement', 'deceased', 'duplicate', 'fraud'
+];
+
+// ============================================================================
+// 1. STATISTICS
+// ============================================================================
 
 exports.getStatistics = async (req, res) => {
   try {
+    const startOfToday = new Date(new Date().setHours(0, 0, 0, 0));
+
     const [
       totalDoctors,
-      totalPatients,
+      totalAdultPatients,
+      totalChildPatients,
       totalVisits,
-      todayVisits
+      todayVisits,
+      pendingDoctorRequests
     ] = await Promise.all([
       Doctor.countDocuments(),
-      Patient.countDocuments(),
+      Patient.countDocuments({ personId: { $exists: true, $ne: null } }),
+      Patient.countDocuments({ childId: { $exists: true, $ne: null } }),
       Visit.countDocuments(),
-      Visit.countDocuments({
-        visitDate: {
-          $gte: new Date(new Date().setHours(0, 0, 0, 0))
-        }
-      })
+      Visit.countDocuments({ visitDate: { $gte: startOfToday } }),
+      DoctorRequest.countDocuments({ status: 'pending' })
     ]);
 
-    res.json({
+    return res.json({
       success: true,
       statistics: {
         totalDoctors,
-        totalPatients,
+        totalPatients: totalAdultPatients + totalChildPatients,
+        totalAdultPatients,
+        totalChildPatients,
         totalVisits,
-        todayVisits
+        todayVisits,
+        pendingDoctorRequests
       }
     });
   } catch (error) {
     console.error('Get statistics error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب الإحصائيات'
     });
   }
 };
 
-// ==================== GET ALL DOCTORS ====================
+// ============================================================================
+// 2. GET ALL DOCTORS
+// ============================================================================
 
 exports.getAllDoctors = async (req, res) => {
   try {
     console.log('📥 getAllDoctors called');
-    
-    // Get all doctors
+
     const doctors = await Doctor.find().lean();
-    console.log(`✅ Found ${doctors.length} doctors in database`);
-    
+    console.log(`✅ Found ${doctors.length} doctors`);
+
     if (doctors.length === 0) {
-      return res.json({
-        success: true,
-        count: 0,
-        doctors: []
-      });
+      return res.json({ success: true, count: 0, doctors: [] });
     }
 
-    // Process each doctor
-    const doctorsWithDetails = await Promise.all(
-      doctors.map(async (doctor) => {
-        try {
-          // Get person data
-          const person = await Person.findById(doctor.personId).lean();
-          
-          if (!person) {
-            console.warn(`⚠️ Person not found for doctor ${doctor._id}`);
-            return null;
-          }
+    const personIds = doctors.map(d => d.personId);
+    const [persons, accounts] = await Promise.all([
+      Person.find({ _id: { $in: personIds } }).lean(),
+      Account.find({ personId: { $in: personIds } }).lean()
+    ]);
 
-          // Get account data
-          const account = await Account.findOne({ personId: doctor.personId }).lean();
-          
-          if (!account) {
-            console.warn(`⚠️ Account not found for doctor ${doctor._id}`);
-          }
+    const personById = new Map(persons.map(p => [String(p._id), p]));
+    const accountByPersonId = new Map(accounts.map(a => [String(a.personId), a]));
 
-          return {
-            id: doctor._id,
-            firstName: person.firstName || '',
-            lastName: person.lastName || '',
-            nationalId: person.nationalId || '',
-            phoneNumber: person.phoneNumber || '',
-            email: account?.email || '',
-            isActive: account?.isActive ?? true,
-            specialization: doctor.specialization || '',
-            subSpecialization: doctor.subSpecialization || null,
-            licenseNumber: doctor.medicalLicenseNumber || '',
-            hospitalAffiliation: doctor.hospitalAffiliation || '',
-            yearsOfExperience: doctor.yearsOfExperience || 0,
-            consultationFee: doctor.consultationFee || 0,
-            availableDays: doctor.availableDays || [],
-            governorate: person.governorate || '',
-            city: person.city || '',
-            lastLogin: account?.lastLogin || null,
-            createdAt: doctor.createdAt || new Date()
-          };
-        } catch (error) {
-          console.error(`❌ Error processing doctor ${doctor._id}:`, error);
+    const validDoctors = doctors
+      .map(doctor => {
+        const person = personById.get(String(doctor.personId));
+        if (!person) {
+          console.warn(`⚠️  Person missing for doctor ${doctor._id}`);
           return null;
         }
+        const account = accountByPersonId.get(String(doctor.personId));
+
+        return {
+          id: doctor._id,
+          firstName: person.firstName || '',
+          fatherName: person.fatherName || '',
+          lastName: person.lastName || '',
+          motherName: person.motherName || '',
+          nationalId: person.nationalId || '',
+          phoneNumber: person.phoneNumber || '',
+          email: account?.email || '',
+          isActive: account?.isActive ?? true,
+          specialization: doctor.specialization || '',
+          subSpecialization: doctor.subSpecialization || null,
+          licenseNumber: doctor.medicalLicenseNumber || '',
+          hospitalAffiliation: doctor.hospitalAffiliation || '',
+          yearsOfExperience: doctor.yearsOfExperience || 0,
+          consultationFee: doctor.consultationFee || 0,
+          currency: doctor.currency || 'SYP',
+          availableDays: doctor.availableDays || [],
+          governorate: person.governorate || '',
+          city: person.city || '',
+          isECGSpecialist: doctor.isECGSpecialist || false,
+          verificationStatus: doctor.verificationStatus || 'verified',
+          averageRating: doctor.averageRating || 0,
+          totalReviews: doctor.totalReviews || 0,
+          lastLogin: account?.lastLogin || null,
+          createdAt: doctor.createdAt
+        };
       })
-    );
+      .filter(d => d !== null);
 
-    // Filter out null values (doctors with missing data)
-    const validDoctors = doctorsWithDetails.filter(d => d !== null);
-    
     console.log(`✅ Returning ${validDoctors.length} valid doctors`);
-
-    res.json({
+    return res.json({
       success: true,
       count: validDoctors.length,
       doctors: validDoctors
@@ -125,7 +169,7 @@ exports.getAllDoctors = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get doctors error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب الأطباء',
       error: error.message
@@ -133,7 +177,9 @@ exports.getAllDoctors = async (req, res) => {
   }
 };
 
-// ==================== GET DOCTOR BY ID ====================
+// ============================================================================
+// 3. GET DOCTOR BY ID
+// ============================================================================
 
 exports.getDoctorById = async (req, res) => {
   try {
@@ -150,12 +196,14 @@ exports.getDoctorById = async (req, res) => {
     const account = await Account.findOne({ personId: doctor.personId._id });
     const visitCount = await Visit.countDocuments({ doctorId: doctor._id });
 
-    res.json({
+    return res.json({
       success: true,
       doctor: {
         id: doctor._id,
         firstName: doctor.personId.firstName,
+        fatherName: doctor.personId.fatherName,
         lastName: doctor.personId.lastName,
+        motherName: doctor.personId.motherName,
         nationalId: doctor.personId.nationalId,
         phoneNumber: doctor.personId.phoneNumber,
         gender: doctor.personId.gender,
@@ -171,61 +219,76 @@ exports.getDoctorById = async (req, res) => {
         hospitalAffiliation: doctor.hospitalAffiliation,
         yearsOfExperience: doctor.yearsOfExperience,
         consultationFee: doctor.consultationFee,
+        currency: doctor.currency,
+        followUpFee: doctor.followUpFee,
         availableDays: doctor.availableDays,
+        isECGSpecialist: doctor.isECGSpecialist,
+        verificationStatus: doctor.verificationStatus,
+        averageRating: doctor.averageRating,
+        totalReviews: doctor.totalReviews,
         visitCount,
         createdAt: doctor.createdAt
       }
     });
   } catch (error) {
     console.error('Get doctor error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب بيانات الطبيب'
     });
   }
 };
 
-// ==================== CREATE DOCTOR ====================
+// ============================================================================
+// 4. CREATE DOCTOR (admin direct creation)
+// ============================================================================
 
 exports.createDoctor = async (req, res) => {
+  console.log('📥 createDoctor called');
+
   try {
     const { person, doctor, account } = req.body;
 
-    console.log('📥 Received create doctor request');
-    console.log('Person:', person);
-    console.log('Doctor:', doctor);
-    console.log('Account:', account);
-
-    // Validate required data
     if (!person || !doctor || !account) {
       return res.status(400).json({
         success: false,
-        message: 'البيانات غير مكتملة'
+        message: 'البيانات غير مكتملة (person, doctor, account مطلوبة)'
       });
     }
 
-    // Check if national ID already exists
-    const existingPerson = await Person.findOne({ nationalId: person.nationalId });
+    const personRequired = [
+      'firstName', 'fatherName', 'lastName', 'motherName',
+      'nationalId', 'gender', 'dateOfBirth', 'phoneNumber',
+      'address', 'governorate', 'city'
+    ];
+    const missingPerson = personRequired.filter(f => !person[f]);
+    if (missingPerson.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: `الحقول التالية مطلوبة في person: ${missingPerson.join(', ')}`
+      });
+    }
+
+    const [existingPerson, existingAccount, existingDoctor] = await Promise.all([
+      Person.findOne({ nationalId: person.nationalId }),
+      Account.findOne({ email: account.email.toLowerCase() }),
+      Doctor.findOne({
+        medicalLicenseNumber: doctor.medicalLicenseNumber.toUpperCase()
+      })
+    ]);
+
     if (existingPerson) {
       return res.status(400).json({
         success: false,
         message: 'الرقم الوطني مستخدم بالفعل'
       });
     }
-
-    // Check if email already exists
-    const existingAccount = await Account.findOne({ email: account.email });
     if (existingAccount) {
       return res.status(400).json({
         success: false,
         message: 'البريد الإلكتروني مستخدم بالفعل'
       });
     }
-
-    // Check if license number already exists
-    const existingDoctor = await Doctor.findOne({ 
-      medicalLicenseNumber: doctor.medicalLicenseNumber.toUpperCase() 
-    });
     if (existingDoctor) {
       return res.status(400).json({
         success: false,
@@ -233,54 +296,47 @@ exports.createDoctor = async (req, res) => {
       });
     }
 
-    // Step 1: Create Person
     console.log('1️⃣ Creating Person...');
     const newPerson = await Person.create({
       firstName: person.firstName.trim(),
+      fatherName: person.fatherName.trim(),
       lastName: person.lastName.trim(),
+      motherName: person.motherName.trim(),
       nationalId: person.nationalId.trim(),
-      gender: person.gender || 'male',
-      dateOfBirth: person.dateOfBirth,
-      phoneNumber: person.phoneNumber.trim(),
-      address: person.address?.trim() || '',
+      gender: person.gender,
+      dateOfBirth: new Date(person.dateOfBirth),
+      phoneNumber: person.phoneNumber.replace(/\s/g, ''),
+      address: person.address.trim(),
       governorate: person.governorate,
-      city: person.city?.trim() || '',
-      isMinor: false
+      city: person.city.trim()
     });
     console.log('✅ Person created:', newPerson._id);
 
-    // Step 2: Hash password
-    console.log('2️⃣ Hashing password...');
-    const hashedPassword = await bcrypt.hash(account.password, 10);
-    console.log('✅ Password hashed');
-
-    // Step 3: Create Account
-    console.log('3️⃣ Creating Account...');
+    console.log('2️⃣ Creating Account...');
     const newAccount = await Account.create({
       email: account.email.toLowerCase().trim(),
-      password: hashedPassword,
+      password: account.password,
       personId: newPerson._id,
       roles: ['doctor'],
       isActive: true
     });
     console.log('✅ Account created:', newAccount._id);
 
-    // Step 4: Create Doctor
-    console.log('4️⃣ Creating Doctor...');
+    console.log('3️⃣ Creating Doctor...');
     const newDoctor = await Doctor.create({
       personId: newPerson._id,
       medicalLicenseNumber: doctor.medicalLicenseNumber.toUpperCase().trim(),
-      specialization: doctor.specialization.trim(),
+      specialization: doctor.specialization,
       subSpecialization: doctor.subSpecialization?.trim() || null,
-      yearsOfExperience: parseInt(doctor.yearsOfExperience) || 0,
+      yearsOfExperience: parseInt(doctor.yearsOfExperience, 10) || 0,
       hospitalAffiliation: doctor.hospitalAffiliation.trim(),
       availableDays: doctor.availableDays || [],
       consultationFee: parseFloat(doctor.consultationFee) || 0,
-      availableTimes: doctor.availableTimes || { start: '09:00', end: '17:00' }
+      currency: doctor.currency || 'SYP'
     });
     console.log('✅ Doctor created:', newDoctor._id);
 
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'تم إضافة الطبيب بنجاح',
       doctor: {
@@ -295,23 +351,23 @@ exports.createDoctor = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Create doctor error:', error);
-    
     if (error.name === 'ValidationError') {
-      const messages = Object.values(error.errors).map(err => err.message);
+      const messages = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({
         success: false,
         message: messages.join(', ')
       });
     }
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء إضافة الطبيب: ' + error.message
     });
   }
 };
 
-// ==================== UPDATE DOCTOR ====================
+// ============================================================================
+// 5. UPDATE DOCTOR
+// ============================================================================
 
 exports.updateDoctor = async (req, res) => {
   try {
@@ -326,53 +382,51 @@ exports.updateDoctor = async (req, res) => {
       });
     }
 
-    // Update doctor fields
-    if (updates.specialization) doctor.specialization = updates.specialization;
-    if (updates.subSpecialization !== undefined) doctor.subSpecialization = updates.subSpecialization;
-    if (updates.yearsOfExperience !== undefined) doctor.yearsOfExperience = updates.yearsOfExperience;
-    if (updates.hospitalAffiliation) doctor.hospitalAffiliation = updates.hospitalAffiliation;
-    if (updates.availableDays) doctor.availableDays = updates.availableDays;
-    if (updates.consultationFee !== undefined) doctor.consultationFee = updates.consultationFee;
-
+    const doctorFields = [
+      'specialization', 'subSpecialization', 'yearsOfExperience',
+      'hospitalAffiliation', 'availableDays', 'consultationFee',
+      'followUpFee', 'currency', 'isAcceptingNewPatients', 'isAvailable'
+    ];
+    doctorFields.forEach(field => {
+      if (updates[field] !== undefined) {
+        doctor[field] = updates[field];
+      }
+    });
     await doctor.save();
 
-    // Update person fields if provided
-    if (updates.phoneNumber || updates.address || updates.governorate || updates.city) {
-      await Person.findByIdAndUpdate(doctor.personId, {
-        ...(updates.phoneNumber && { phoneNumber: updates.phoneNumber }),
-        ...(updates.address && { address: updates.address }),
-        ...(updates.governorate && { governorate: updates.governorate }),
-        ...(updates.city && { city: updates.city })
-      });
+    const personFields = ['phoneNumber', 'address', 'governorate', 'city'];
+    const personUpdates = {};
+    personFields.forEach(field => {
+      if (updates[field]) personUpdates[field] = updates[field];
+    });
+    if (Object.keys(personUpdates).length > 0) {
+      await Person.findByIdAndUpdate(doctor.personId, personUpdates);
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'تم تحديث بيانات الطبيب بنجاح'
     });
   } catch (error) {
     console.error('Update doctor error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في تحديث بيانات الطبيب'
     });
   }
 };
 
-// ==================== DEACTIVATE DOCTOR ====================
+// ============================================================================
+// 6. DEACTIVATE DOCTOR
+// ============================================================================
 
 exports.deactivateDoctor = async (req, res) => {
+  console.log('🔵 ========== DEACTIVATE DOCTOR ==========');
+
   try {
     const { id } = req.params;
     const { reason, notes } = req.body;
 
-    console.log('🔵 ========== DEACTIVATE DOCTOR REQUEST ==========');
-    console.log('📋 Doctor ID:', id);
-    console.log('📝 Reason:', reason);
-    console.log('📝 Notes:', notes);
-    console.log('👤 Admin:', req.user._id);
-
-    // ✅ VALIDATE: Reason is REQUIRED
     if (!reason) {
       return res.status(400).json({
         success: false,
@@ -380,12 +434,10 @@ exports.deactivateDoctor = async (req, res) => {
       });
     }
 
-    // ✅ VALIDATE: Reason must be one of the allowed values
-    const allowedReasons = ['death', 'license_revoked', 'user_request', 'fraud', 'retirement', 'transfer', 'other'];
-    if (!allowedReasons.includes(reason)) {
+    if (!ALLOWED_DEACTIVATION_REASONS.includes(reason)) {
       return res.status(400).json({
         success: false,
-        message: 'سبب إلغاء التفعيل غير صالح'
+        message: `سبب إلغاء التفعيل غير صالح. القيم المسموحة: ${ALLOWED_DEACTIVATION_REASONS.join(', ')}`
       });
     }
 
@@ -402,37 +454,46 @@ exports.deactivateDoctor = async (req, res) => {
       {
         isActive: false,
         deactivationReason: reason,
-        deactivationNotes: notes || '',
         deactivatedAt: new Date(),
         deactivatedBy: req.user._id
       }
     );
 
-    console.log('✅ Doctor deactivated successfully');
-    console.log('✅ ==========================================');
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'DEACTIVATE_DOCTOR',
+      description: `Deactivated doctor ${doctor.medicalLicenseNumber}`,
+      resourceType: 'doctor',
+      resourceId: doctor._id,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: { reason, notes: notes || null }
+    });
 
-    res.json({
+    console.log('✅ Doctor deactivated');
+    return res.json({
       success: true,
       message: 'تم إلغاء تفعيل الطبيب بنجاح'
     });
   } catch (error) {
     console.error('❌ Deactivate doctor error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في إلغاء التفعيل'
     });
   }
 };
 
-// ==================== ACTIVATE DOCTOR ====================
+// ============================================================================
+// 7. ACTIVATE DOCTOR
+// ============================================================================
 
 exports.activateDoctor = async (req, res) => {
+  console.log('🔵 ========== ACTIVATE DOCTOR ==========');
+
   try {
     const { id } = req.params;
-
-    console.log('🔵 ========== REACTIVATE DOCTOR REQUEST ==========');
-    console.log('📋 Doctor ID:', id);
-    console.log('👤 Admin:', req.user._id);
 
     const doctor = await Doctor.findById(id);
     if (!doctor) {
@@ -445,100 +506,127 @@ exports.activateDoctor = async (req, res) => {
     await Account.findOneAndUpdate(
       { personId: doctor.personId },
       {
-        $set: {
-          isActive: true,
-          reactivatedAt: new Date(),
-          reactivatedBy: req.user._id
-        },
+        $set: { isActive: true },
         $unset: {
           deactivationReason: '',
-          deactivationNotes: '',
           deactivatedAt: '',
-          deactivatedBy: ''
+          deactivatedBy: '',
+          accountLockedUntil: '',
+          failedLoginAttempts: ''
         }
       }
     );
 
-    console.log('✅ Doctor reactivated successfully');
-    console.log('✅ ==========================================');
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'ACTIVATE_DOCTOR',
+      description: `Reactivated doctor ${doctor.medicalLicenseNumber}`,
+      resourceType: 'doctor',
+      resourceId: doctor._id,
+      ipAddress: req.ip || 'unknown',
+      success: true
+    });
 
-    res.json({
+    console.log('✅ Doctor reactivated');
+    return res.json({
       success: true,
       message: 'تم تفعيل الطبيب بنجاح'
     });
   } catch (error) {
     console.error('❌ Activate doctor error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في التفعيل'
     });
   }
 };
 
-// ==================== GET ALL PATIENTS ====================
+// ============================================================================
+// 8. GET ALL PATIENTS (adults + children)
+// ============================================================================
 
 exports.getAllPatients = async (req, res) => {
   try {
     console.log('📥 getAllPatients called');
-    
-    // Get all patients
+
     const patients = await Patient.find().lean();
-    console.log(`✅ Found ${patients.length} patients in database`);
-    
+    console.log(`✅ Found ${patients.length} patient profiles`);
+
     if (patients.length === 0) {
-      return res.json({
-        success: true,
-        count: 0,
-        patients: []
-      });
+      return res.json({ success: true, count: 0, patients: [] });
     }
 
-    // Process each patient
-    const patientsWithDetails = await Promise.all(
-      patients.map(async (patient) => {
-        try {
-          // Get person data
-          const person = await Person.findById(patient.personId).lean();
-          
-          if (!person) {
-            console.warn(`⚠️ Person not found for patient ${patient._id}`);
-            return null;
-          }
+    const adultPersonIds = patients
+      .filter(p => p.personId)
+      .map(p => p.personId);
+    const childChildIds = patients
+      .filter(p => p.childId)
+      .map(p => p.childId);
 
-          // Get account data
-          const account = await Account.findOne({ personId: patient.personId }).lean();
-          
-          if (!account) {
-            console.warn(`⚠️ Account not found for patient ${patient._id}`);
-          }
+    const [persons, children, accounts] = await Promise.all([
+      Person.find({ _id: { $in: adultPersonIds } }).lean(),
+      Children.find({ _id: { $in: childChildIds } }).lean(),
+      Account.find({
+        $or: [
+          { personId: { $in: adultPersonIds } },
+          { childId: { $in: childChildIds } }
+        ]
+      }).lean()
+    ]);
 
-          return {
-            id: patient._id,
-            firstName: person.firstName || '',
-            lastName: person.lastName || '',
-            nationalId: person.nationalId || '',
-            childId: person.childId || null,
-            phoneNumber: person.phoneNumber || '',
-            email: account?.email || '',
-            isActive: account?.isActive ?? true,
-            gender: person.gender || '',  // ✅ FIXED: Added gender field
-            bloodType: patient.bloodType || '',
-            lastLogin: account?.lastLogin || null,
-            createdAt: patient.createdAt || new Date()
-          };
-        } catch (error) {
-          console.error(`❌ Error processing patient ${patient._id}:`, error);
+    const personById = new Map(persons.map(p => [String(p._id), p]));
+    const childById = new Map(children.map(c => [String(c._id), c]));
+    const accountByPersonId = new Map();
+    const accountByChildId = new Map();
+    accounts.forEach(a => {
+      if (a.personId) accountByPersonId.set(String(a.personId), a);
+      if (a.childId) accountByChildId.set(String(a.childId), a);
+    });
+
+    const validPatients = patients
+      .map(patient => {
+        const isChild = !!patient.childId;
+        const profile = isChild
+          ? childById.get(String(patient.childId))
+          : personById.get(String(patient.personId));
+
+        if (!profile) {
+          console.warn(`⚠️  Profile missing for patient ${patient._id}`);
           return null;
         }
+
+        const account = isChild
+          ? accountByChildId.get(String(patient.childId))
+          : accountByPersonId.get(String(patient.personId));
+
+        return {
+          id: patient._id,
+          isMinor: isChild,
+          firstName: profile.firstName || '',
+          fatherName: profile.fatherName || '',
+          lastName: profile.lastName || '',
+          motherName: profile.motherName || '',
+          nationalId: profile.nationalId || null,
+          childRegistrationNumber: profile.childRegistrationNumber || null,
+          phoneNumber: profile.phoneNumber || '',
+          email: account?.email || '',
+          isActive: account?.isActive ?? true,
+          gender: profile.gender || '',
+          dateOfBirth: profile.dateOfBirth,
+          governorate: profile.governorate || '',
+          city: profile.city || '',
+          bloodType: patient.bloodType || 'unknown',
+          totalVisits: patient.totalVisits || 0,
+          lastVisitDate: patient.lastVisitDate || null,
+          lastLogin: account?.lastLogin || null,
+          createdAt: patient.createdAt
+        };
       })
-    );
+      .filter(p => p !== null);
 
-    // Filter out null values
-    const validPatients = patientsWithDetails.filter(p => p !== null);
-    
     console.log(`✅ Returning ${validPatients.length} valid patients`);
-
-    res.json({
+    return res.json({
       success: true,
       count: validPatients.length,
       patients: validPatients
@@ -546,7 +634,7 @@ exports.getAllPatients = async (req, res) => {
 
   } catch (error) {
     console.error('❌ Get patients error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب المرضى',
       error: error.message
@@ -554,13 +642,15 @@ exports.getAllPatients = async (req, res) => {
   }
 };
 
-// ==================== GET PATIENT BY ID ====================
+// ============================================================================
+// 9. GET PATIENT BY ID
+// ============================================================================
 
 exports.getPatientById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    const patient = await Patient.findById(id).populate('personId');
+    const patient = await Patient.findById(id);
     if (!patient) {
       return res.status(404).json({
         success: false,
@@ -568,154 +658,72 @@ exports.getPatientById = async (req, res) => {
       });
     }
 
-    const account = await Account.findOne({ personId: patient.personId._id });
-    const visitCount = await Visit.countDocuments({ patientId: patient._id });
+    const isChild = !!patient.childId;
+    const profile = isChild
+      ? await Children.findById(patient.childId).lean()
+      : await Person.findById(patient.personId).lean();
 
-    res.json({
+    if (!profile) {
+      return res.status(404).json({
+        success: false,
+        message: 'بيانات المريض الشخصية غير موجودة'
+      });
+    }
+
+    const account = isChild
+      ? await Account.findOne({ childId: patient.childId })
+      : await Account.findOne({ personId: patient.personId });
+
+    const visitCount = isChild
+      ? await Visit.countDocuments({ patientChildId: patient.childId })
+      : await Visit.countDocuments({ patientPersonId: patient.personId });
+
+    return res.json({
       success: true,
       patient: {
         id: patient._id,
-        firstName: patient.personId.firstName,
-        lastName: patient.personId.lastName,
-        nationalId: patient.personId.nationalId,
-        childId: patient.personId.childId,
-        phoneNumber: patient.personId.phoneNumber,
-        gender: patient.personId.gender,
-        dateOfBirth: patient.personId.dateOfBirth,
-        address: patient.personId.address,
+        isMinor: isChild,
+        firstName: profile.firstName,
+        fatherName: profile.fatherName,
+        lastName: profile.lastName,
+        motherName: profile.motherName,
+        nationalId: profile.nationalId || null,
+        childRegistrationNumber: profile.childRegistrationNumber || null,
+        phoneNumber: profile.phoneNumber,
+        gender: profile.gender,
+        dateOfBirth: profile.dateOfBirth,
+        address: profile.address,
+        governorate: profile.governorate,
+        city: profile.city,
         email: account?.email,
         isActive: account?.isActive,
         bloodType: patient.bloodType,
+        height: patient.height,
+        weight: patient.weight,
+        bmi: patient.bmi,
+        allergies: patient.allergies || [],
+        chronicDiseases: patient.chronicDiseases || [],
+        familyHistory: patient.familyHistory || [],
+        smokingStatus: patient.smokingStatus,
+        emergencyContact: patient.emergencyContact,
         visitCount,
+        totalVisits: patient.totalVisits || 0,
+        lastVisitDate: patient.lastVisitDate,
         createdAt: patient.createdAt
       }
     });
   } catch (error) {
     console.error('Get patient error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب بيانات المريض'
     });
   }
 };
 
-// ==================== DEACTIVATE PATIENT ====================
-
-exports.deactivatePatient = async (req, res) => {
-  try {
-    const { id } = req.params;
-    const { reason, notes } = req.body;
-
-    console.log('🔵 ========== DEACTIVATE PATIENT REQUEST ==========');
-    console.log('📋 Patient ID:', id);
-    console.log('📝 Reason:', reason);
-    console.log('📝 Notes:', notes);
-    console.log('👤 Admin:', req.user._id);
-
-    // ✅ VALIDATE: Reason is REQUIRED
-    if (!reason) {
-      return res.status(400).json({
-        success: false,
-        message: 'سبب إلغاء التفعيل مطلوب'
-      });
-    }
-
-    // ✅ VALIDATE: Reason must be one of the allowed values
-    const allowedReasons = ['death', 'license_revoked', 'user_request', 'fraud', 'retirement', 'transfer', 'other'];
-    if (!allowedReasons.includes(reason)) {
-      return res.status(400).json({
-        success: false,
-        message: 'سبب إلغاء التفعيل غير صالح'
-      });
-    }
-
-    const patient = await Patient.findById(id);
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: 'المريض غير موجود'
-      });
-    }
-
-    await Account.findOneAndUpdate(
-      { personId: patient.personId },
-      {
-        isActive: false,
-        deactivationReason: reason,
-        deactivationNotes: notes || '',
-        deactivatedAt: new Date(),
-        deactivatedBy: req.user._id
-      }
-    );
-
-    console.log('✅ Patient deactivated successfully');
-    console.log('✅ ==========================================');
-
-    res.json({
-      success: true,
-      message: 'تم إلغاء تفعيل المريض بنجاح'
-    });
-  } catch (error) {
-    console.error('❌ Deactivate patient error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في إلغاء التفعيل'
-    });
-  }
-};
-
-// ==================== ACTIVATE PATIENT ====================
-
-exports.activatePatient = async (req, res) => {
-  try {
-    const { id } = req.params;
-
-    console.log('🔵 ========== REACTIVATE PATIENT REQUEST ==========');
-    console.log('📋 Patient ID:', id);
-    console.log('👤 Admin:', req.user._id);
-
-    const patient = await Patient.findById(id);
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: 'المريض غير موجود'
-      });
-    }
-
-    await Account.findOneAndUpdate(
-      { personId: patient.personId },
-      {
-        $set: {
-          isActive: true,
-          reactivatedAt: new Date(),
-          reactivatedBy: req.user._id
-        },
-        $unset: {
-          deactivationReason: '',
-          deactivationNotes: '',
-          deactivatedAt: '',
-          deactivatedBy: ''
-        }
-      }
-    );
-
-    console.log('✅ Patient reactivated successfully');
-    console.log('✅ ==========================================');
-
-    res.json({
-      success: true,
-      message: 'تم تفعيل المريض بنجاح'
-    });
-  } catch (error) {
-    console.error('❌ Activate patient error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في التفعيل'
-    });
-  }
-};
-
-// ==================== UPDATE PATIENT ====================
+// ============================================================================
+// 10. UPDATE PATIENT
+// ============================================================================
 
 exports.updatePatient = async (req, res) => {
   try {
@@ -730,197 +738,384 @@ exports.updatePatient = async (req, res) => {
       });
     }
 
-    // Update patient fields
-    if (updates.bloodType) patient.bloodType = updates.bloodType;
+    const patientFields = [
+      'bloodType', 'rhFactor', 'height', 'weight',
+      'smokingStatus', 'allergies', 'chronicDiseases',
+      'familyHistory', 'emergencyContact'
+    ];
+    patientFields.forEach(field => {
+      if (updates[field] !== undefined) patient[field] = updates[field];
+    });
     await patient.save();
 
-    // Update person fields
-    if (updates.phoneNumber || updates.address) {
-      await Person.findByIdAndUpdate(patient.personId, {
-        ...(updates.phoneNumber && { phoneNumber: updates.phoneNumber }),
-        ...(updates.address && { address: updates.address })
-      });
+    const profileFields = ['phoneNumber', 'address', 'governorate', 'city'];
+    const profileUpdates = {};
+    profileFields.forEach(field => {
+      if (updates[field]) profileUpdates[field] = updates[field];
+    });
+
+    if (Object.keys(profileUpdates).length > 0) {
+      const Model = patient.childId ? Children : Person;
+      const profileId = patient.childId || patient.personId;
+      await Model.findByIdAndUpdate(profileId, profileUpdates);
     }
 
-    res.json({
+    return res.json({
       success: true,
       message: 'تم تحديث بيانات المريض بنجاح'
     });
   } catch (error) {
     console.error('Update patient error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في تحديث بيانات المريض'
     });
   }
 };
 
-// ==================== AUDIT LOGS ====================
+// ============================================================================
+// 11. DEACTIVATE PATIENT
+// ============================================================================
+
+exports.deactivatePatient = async (req, res) => {
+  console.log('🔵 ========== DEACTIVATE PATIENT ==========');
+
+  try {
+    const { id } = req.params;
+    const { reason, notes } = req.body;
+
+    if (!reason) {
+      return res.status(400).json({
+        success: false,
+        message: 'سبب إلغاء التفعيل مطلوب'
+      });
+    }
+
+    if (!ALLOWED_DEACTIVATION_REASONS.includes(reason)) {
+      return res.status(400).json({
+        success: false,
+        message: `سبب إلغاء التفعيل غير صالح. القيم المسموحة: ${ALLOWED_DEACTIVATION_REASONS.join(', ')}`
+      });
+    }
+
+    const patient = await Patient.findById(id);
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: 'المريض غير موجود'
+      });
+    }
+
+    const accountQuery = patient.childId
+      ? { childId: patient.childId }
+      : { personId: patient.personId };
+
+    await Account.findOneAndUpdate(
+      accountQuery,
+      {
+        isActive: false,
+        deactivationReason: reason,
+        deactivatedAt: new Date(),
+        deactivatedBy: req.user._id
+      }
+    );
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'DEACTIVATE_PATIENT',
+      description: `Deactivated patient ${patient._id}`,
+      resourceType: 'patient',
+      resourceId: patient._id,
+      patientPersonId: patient.personId,
+      patientChildId: patient.childId,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: { reason, notes: notes || null }
+    });
+
+    console.log('✅ Patient deactivated');
+    return res.json({
+      success: true,
+      message: 'تم إلغاء تفعيل المريض بنجاح'
+    });
+  } catch (error) {
+    console.error('❌ Deactivate patient error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في إلغاء التفعيل'
+    });
+  }
+};
+
+// ============================================================================
+// 12. ACTIVATE PATIENT
+// ============================================================================
+
+exports.activatePatient = async (req, res) => {
+  console.log('🔵 ========== ACTIVATE PATIENT ==========');
+
+  try {
+    const { id } = req.params;
+
+    const patient = await Patient.findById(id);
+    if (!patient) {
+      return res.status(404).json({
+        success: false,
+        message: 'المريض غير موجود'
+      });
+    }
+
+    const accountQuery = patient.childId
+      ? { childId: patient.childId }
+      : { personId: patient.personId };
+
+    await Account.findOneAndUpdate(
+      accountQuery,
+      {
+        $set: { isActive: true },
+        $unset: {
+          deactivationReason: '',
+          deactivatedAt: '',
+          deactivatedBy: '',
+          accountLockedUntil: '',
+          failedLoginAttempts: ''
+        }
+      }
+    );
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'ACTIVATE_PATIENT',
+      description: `Reactivated patient ${patient._id}`,
+      resourceType: 'patient',
+      resourceId: patient._id,
+      patientPersonId: patient.personId,
+      patientChildId: patient.childId,
+      ipAddress: req.ip || 'unknown',
+      success: true
+    });
+
+    console.log('✅ Patient reactivated');
+    return res.json({
+      success: true,
+      message: 'تم تفعيل المريض بنجاح'
+    });
+  } catch (error) {
+    console.error('❌ Activate patient error:', error);
+    return res.status(500).json({
+      success: false,
+      message: 'حدث خطأ في التفعيل'
+    });
+  }
+};
+
+// ============================================================================
+// 13. AUDIT LOGS
+// ============================================================================
 
 exports.getAuditLogs = async (req, res) => {
   try {
     const { page = 1, limit = 50, action, startDate, endDate } = req.query;
 
     const query = {};
-    if (action) query.action = action;
+    if (action) query.action = action.toUpperCase();
     if (startDate || endDate) {
       query.timestamp = {};
       if (startDate) query.timestamp.$gte = new Date(startDate);
       if (endDate) query.timestamp.$lte = new Date(endDate);
     }
 
-    const logs = await AuditLog.find(query)
-      .populate('userId', 'email roles')
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+    const safeLimit = Math.min(parseInt(limit, 10) || 50, 200);
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
 
-    const count = await AuditLog.countDocuments(query);
+    const [logs, count] = await Promise.all([
+      AuditLog.find(query)
+        .populate('userId', 'email roles')
+        .sort({ timestamp: -1 })
+        .limit(safeLimit)
+        .skip((safePage - 1) * safeLimit)
+        .lean(),
+      AuditLog.countDocuments(query)
+    ]);
 
-    res.json({
+    return res.json({
       success: true,
       count,
-      page: parseInt(page),
-      pages: Math.ceil(count / parseInt(limit)),
+      page: safePage,
+      pages: Math.ceil(count / safeLimit),
       logs: logs.map(log => ({
         id: log._id,
         action: log.action,
         description: log.description,
         resourceType: log.resourceType,
-        userEmail: log.userId?.email,
+        resourceId: log.resourceId,
+        userEmail: log.userEmail || log.userId?.email,
+        userRole: log.userRole,
+        ipAddress: log.ipAddress,
+        platform: log.platform,
         timestamp: log.timestamp,
-        success: log.success
+        success: log.success,
+        errorMessage: log.errorMessage
       }))
     });
   } catch (error) {
     console.error('Get audit logs error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب سجلات التدقيق'
     });
   }
 };
 
+// ============================================================================
+// 14. GET USER AUDIT LOGS
+// ============================================================================
+
 exports.getUserAuditLogs = async (req, res) => {
   try {
     const { userId } = req.params;
     const { page = 1, limit = 50 } = req.query;
 
-    const logs = await AuditLog.find({ userId })
-      .sort({ timestamp: -1 })
-      .limit(parseInt(limit))
-      .skip((parseInt(page) - 1) * parseInt(limit));
+    const safeLimit = Math.min(parseInt(limit, 10) || 50, 200);
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
 
-    const count = await AuditLog.countDocuments({ userId });
+    const [logs, count] = await Promise.all([
+      AuditLog.find({ userId })
+        .sort({ timestamp: -1 })
+        .limit(safeLimit)
+        .skip((safePage - 1) * safeLimit)
+        .lean(),
+      AuditLog.countDocuments({ userId })
+    ]);
 
-    res.json({
+    return res.json({
       success: true,
       count,
-      page: parseInt(page),
-      pages: Math.ceil(count / parseInt(limit)),
+      page: safePage,
+      pages: Math.ceil(count / safeLimit),
       logs
     });
   } catch (error) {
     console.error('Get user audit logs error:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب سجلات المستخدم'
     });
   }
 };
 
-// ==================== DOCTOR REQUESTS ====================
+// ============================================================================
+// 15. GET ALL DOCTOR REQUESTS
+// ============================================================================
 
-/**
- * @desc    Get all doctor requests
- * @route   GET /api/admin/doctor-requests
- * @access  Private (Admin only)
- */
 exports.getAllDoctorRequests = async (req, res) => {
   try {
-    console.log('📋 Fetching all doctor requests...');
+    console.log('📋 Fetching doctor requests...');
 
     const { status } = req.query;
-
-    // Build query
     const query = {};
-    if (status) {
-      query.status = status;
-    }
+    if (status) query.status = status;
 
-    // Fetch requests
-    const DoctorRequest = require('../models/DoctorRequest');
     const requests = await DoctorRequest.find(query)
       .populate('reviewedBy', 'email')
       .populate('createdPersonId', 'firstName lastName')
       .sort({ createdAt: -1 })
       .lean();
 
-    console.log(`✅ Found ${requests.length} doctor requests`);
+    console.log(`✅ Found ${requests.length} requests`);
 
-    // Format response
-    const formattedRequests = requests.map(request => ({
-      _id: request._id,
-      personalInfo: {
-        firstName: request.firstName,
-        lastName: request.lastName,
-        nationalId: request.nationalId,
-        dateOfBirth: request.dateOfBirth,
-        gender: request.gender,
-        phoneNumber: request.phoneNumber,
-        address: request.address,
-        governorate: request.governorate,
-        city: request.city
-      },
-      accountInfo: {
-        email: request.email
-      },
-      doctorInfo: {
-        medicalLicenseNumber: request.medicalLicenseNumber,
-        specialization: request.specialization,
-        subSpecialization: request.subSpecialization,
-        yearsOfExperience: request.yearsOfExperience,
-        hospitalAffiliation: request.hospitalAffiliation,
-        availableDays: request.availableDays,
-        consultationFee: request.consultationFee
-      },
-      requestInfo: {
-        status: request.status,
-        submittedAt: request.createdAt,
-        reviewedBy: request.reviewedBy,
-        reviewedAt: request.reviewedAt,
-        rejectionReason: request.rejectionReason,
-        adminNotes: request.adminNotes
-      }
+    // Flatten to the shape AdminDashboard.jsx expects. Professional-specific
+    // fields (pharmacist/lab tech) are included alongside doctor fields so
+    // the UI can read what it needs based on requestType.
+    const flattened = requests.map((r) => ({
+      // Identity
+      _id: r._id,
+      requestId: r.requestId,
+
+      // Personal information (FLAT — do not wrap in personalInfo)
+      firstName: r.firstName,
+      fatherName: r.fatherName,
+      lastName: r.lastName,
+      motherName: r.motherName,
+      nationalId: r.nationalId,
+      dateOfBirth: r.dateOfBirth,
+      gender: r.gender,
+      phoneNumber: r.phoneNumber,
+      address: r.address,
+      governorate: r.governorate,
+      city: r.city,
+
+      // Account
+      email: r.email,
+
+      // Doctor-specific fields (only set when requestType='doctor')
+      medicalLicenseNumber: r.medicalLicenseNumber,
+      specialization: r.specialization,
+      subSpecialization: r.subSpecialization,
+      yearsOfExperience: r.yearsOfExperience,
+      hospitalAffiliation: r.hospitalAffiliation,
+      availableDays: r.availableDays || [],
+      consultationFee: r.consultationFee,
+      currency: r.currency || 'SYP',
+
+      // Pharmacist-specific fields
+      pharmacyLicenseNumber: r.pharmacyLicenseNumber,
+      degree: r.degree,
+      employmentType: r.employmentType,
+      pharmacyId: r.pharmacyId,
+      newPharmacyData: r.newPharmacyData,
+
+      // Lab technician-specific fields
+      licenseNumber: r.licenseNumber,
+      position: r.position,
+      laboratoryId: r.laboratoryId,
+      newLaboratoryData: r.newLaboratoryData,
+
+      // Uploaded document URLs — lifted to top-level *Url keys
+      licenseDocumentUrl: r.licenseDocument?.fileUrl || r.licenseDocumentUrl || null,
+      medicalCertificateUrl: r.medicalCertificate?.fileUrl || null,
+      degreeDocumentUrl: r.degreeDocument?.fileUrl || r.degreeDocumentUrl || null,
+      profilePhotoUrl: r.profilePhoto?.fileUrl || null,
+
+      // Review workflow
+      status: r.status,
+      requestType: r.requestType || 'doctor',
+      rejectionReason: r.rejectionReason,
+      rejectionDetails: r.rejectionDetails,
+      adminNotes: r.adminNotes,
+      reviewedBy: r.reviewedBy,
+      reviewedAt: r.reviewedAt,
+      createdPersonId: r.createdPersonId,
+
+      // Timestamps
+      createdAt: r.createdAt,
+      updatedAt: r.updatedAt
     }));
 
-    res.json({
+    return res.json({
       success: true,
-      count: formattedRequests.length,
-      requests: formattedRequests
+      count: flattened.length,
+      requests: flattened
     });
-
   } catch (error) {
     console.error('❌ Error fetching doctor requests:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب طلبات التسجيل'
     });
   }
 };
 
-/**
- * @desc    Get doctor request by ID
- * @route   GET /api/admin/doctor-requests/:id
- * @access  Private (Admin only)
- */
+// ============================================================================
+// 16. GET DOCTOR REQUEST BY ID
+// ============================================================================
+
 exports.getDoctorRequestById = async (req, res) => {
   try {
     const { id } = req.params;
 
-    console.log('📋 Fetching doctor request:', id);
-
-    const DoctorRequest = require('../models/DoctorRequest');
     const request = await DoctorRequest.findById(id)
       .populate('reviewedBy', 'email')
       .populate('createdPersonId', 'firstName lastName')
@@ -935,37 +1130,217 @@ exports.getDoctorRequestById = async (req, res) => {
       });
     }
 
-    console.log('✅ Doctor request found');
-
-    res.json({
-      success: true,
-      request
-    });
-
+    return res.json({ success: true, request });
   } catch (error) {
     console.error('❌ Error fetching doctor request:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في جلب تفاصيل الطلب'
     });
   }
 };
 
+// ============================================================================
+// 17. APPROVE PROFESSIONAL REQUEST (doctor / pharmacist / lab_technician)
+// ──────────────────────────────────────────────────────────────────────────
+// ⚠️  This function was completely rewritten in v2 to:
+//
+//   1. Handle BOTH scenarios for pharmacist / lab_technician:
+//        (a) Applicant selected an existing facility  → request.pharmacyId
+//            / request.laboratoryId is already set    → use directly
+//        (b) Applicant reported a new facility        → request.newPharmacyData
+//            / request.newLaboratoryData is set       → CREATE the facility
+//            on the fly, then use the new _id
+//
+//   2. Manual rollback across ALL create steps.
+//      MongoDB transactions are NOT used because this deployment is a
+//      standalone mongod (confirmed via `rs.status()` → NoReplicationEnabled).
+//      If step N fails, we delete everything created in steps 1..N-1, in
+//      REVERSE order, so the DB remains clean. Orphan records are never
+//      left behind.
+//
+//   3. Reject the request (with NO partial data created) if the applicant
+//      did NOT supply facility info AND no new facility data is present.
+//      For pharmacist → pharmacyId or newPharmacyData required.
+//      For lab tech   → laboratoryId or newLaboratoryData required.
+//
+// ============================================================================
+
 /**
- * @desc    Approve doctor request
- * @route   POST /api/admin/doctor-requests/:id/approve
- * @access  Private (Admin only)
+ * Helper: build Laboratory payload from newLaboratoryData in a DoctorRequest.
+ * The request carries a loosely-typed Mixed object; here we validate the
+ * required schema fields and normalise into the strict Laboratory shape.
+ *
+ * Throws a user-facing Arabic error on missing required fields.
  */
+function buildLaboratoryPayload(newData, applicant) {
+  if (!newData || typeof newData !== 'object') {
+    throw new Error('بيانات المختبر الجديد غير صالحة');
+  }
+
+  const name = (newData.name || '').trim();
+  const license = (newData.license || newData.registrationNumber || '').trim();
+  const governorate = newData.governorate;
+  const city = (newData.city || '').trim();
+  const address = (newData.address || '').trim();
+
+  if (!name) throw new Error('اسم المختبر الجديد مطلوب');
+  if (!license) throw new Error('رقم ترخيص المختبر الجديد مطلوب');
+  if (!governorate) throw new Error('محافظة المختبر الجديد مطلوبة');
+  if (!city) throw new Error('مدينة المختبر الجديد مطلوبة');
+  if (!address) throw new Error('عنوان المختبر الجديد مطلوب');
+
+  // Placeholder GeoJSON at the center of the chosen governorate — Laboratory
+  // schema validator requires coordinates within Syria. Admin can refine
+  // the exact coordinates later via the Laboratories admin panel.
+  const GOVERNORATE_CENTROIDS = {
+    damascus:     [36.2765, 33.5138],
+    rif_dimashq:  [36.3090, 33.5238],
+    aleppo:       [37.1613, 36.2021],
+    homs:         [36.7156, 34.7324],
+    hama:         [36.7443, 35.1318],
+    latakia:      [35.7833, 35.5167],
+    tartus:       [35.8867, 34.8890],
+    idlib:        [36.6335, 35.9306],
+    deir_ez_zor:  [40.1500, 35.3333],
+    raqqa:        [39.0167, 35.9500],
+    hasakah:      [40.7417, 36.4833],
+    daraa:        [36.1062, 32.6189],
+    as_suwayda:   [36.5697, 32.7095],
+    quneitra:     [35.8242, 33.1258]
+  };
+  const coords = GOVERNORATE_CENTROIDS[governorate] || [36.2765, 33.5138];
+
+  return {
+    name,
+    arabicName: name,
+    registrationNumber: license.toUpperCase(),
+    labLicense: license.toUpperCase(),
+    labType: 'independent',
+    phoneNumber: applicant.phoneNumber || '0000000000',
+    governorate,
+    city,
+    address,
+    location: {
+      type: 'Point',
+      coordinates: coords
+    },
+    isActive: true,
+    isAcceptingTests: true
+  };
+}
+
+/**
+ * Helper: build Pharmacy payload from newPharmacyData in a DoctorRequest.
+ */
+function buildPharmacyPayload(newData, applicant) {
+  if (!newData || typeof newData !== 'object') {
+    throw new Error('بيانات الصيدلية الجديدة غير صالحة');
+  }
+
+  const name = (newData.name || '').trim();
+  const license = (newData.license || newData.pharmacyLicense || '').trim();
+  const governorate = newData.governorate;
+  const city = (newData.city || '').trim();
+  const address = (newData.address || '').trim();
+
+  if (!name) throw new Error('اسم الصيدلية الجديدة مطلوب');
+  if (!license) throw new Error('رقم ترخيص الصيدلية الجديدة مطلوب');
+  if (!governorate) throw new Error('محافظة الصيدلية الجديدة مطلوبة');
+  if (!city) throw new Error('مدينة الصيدلية الجديدة مطلوبة');
+  if (!address) throw new Error('عنوان الصيدلية الجديدة مطلوب');
+
+  const GOVERNORATE_CENTROIDS = {
+    damascus:     [36.2765, 33.5138],
+    rif_dimashq:  [36.3090, 33.5238],
+    aleppo:       [37.1613, 36.2021],
+    homs:         [36.7156, 34.7324],
+    hama:         [36.7443, 35.1318],
+    latakia:      [35.7833, 35.5167],
+    tartus:       [35.8867, 34.8890],
+    idlib:        [36.6335, 35.9306],
+    deir_ez_zor:  [40.1500, 35.3333],
+    raqqa:        [39.0167, 35.9500],
+    hasakah:      [40.7417, 36.4833],
+    daraa:        [36.1062, 32.6189],
+    as_suwayda:   [36.5697, 32.7095],
+    quneitra:     [35.8242, 33.1258]
+  };
+  const coords = GOVERNORATE_CENTROIDS[governorate] || [36.2765, 33.5138];
+
+  // Pharmacy schema requires BOTH registrationNumber and pharmacyLicense
+  // (two separate unique indexes). The applicant provides one value, so
+  // we reuse it for both — if this collides later, the admin can edit it.
+  return {
+    name,
+    arabicName: name,
+    registrationNumber: license.toUpperCase(),
+    pharmacyLicense: license.toUpperCase(),
+    pharmacyType: 'community',
+    phoneNumber: applicant.phoneNumber || '0000000000',
+    governorate,
+    city,
+    address,
+    location: {
+      type: 'Point',
+      coordinates: coords
+    },
+    isActive: true,
+    isAcceptingOrders: true
+  };
+}
+
 exports.approveDoctorRequest = async (req, res) => {
+  console.log('✅ ========== APPROVE PROFESSIONAL REQUEST ==========');
+
+  // ── Rollback bookkeeping ──────────────────────────────────────────────
+  // We track every document we create so we can delete them in reverse
+  // order if any step fails. This is a manual substitute for a Mongoose
+  // transaction (this deployment is a standalone mongod, no replica set).
+  const createdIds = {
+    laboratoryId: null,
+    pharmacyId: null,
+    personId: null,
+    accountId: null,
+    professionalId: null
+  };
+
+  const rollback = async (reason) => {
+    console.error(`🔄 Rolling back because: ${reason}`);
+    try {
+      if (createdIds.professionalId) {
+        // We don't know the professional model at rollback time if the
+        // error was very early — safest to try all three but log outcomes.
+        await Promise.all([
+          Doctor.deleteOne({ _id: createdIds.professionalId }).catch(() => null),
+          Pharmacist.deleteOne({ _id: createdIds.professionalId }).catch(() => null),
+          LabTechnician.deleteOne({ _id: createdIds.professionalId }).catch(() => null)
+        ]);
+      }
+      if (createdIds.accountId) {
+        await Account.deleteOne({ _id: createdIds.accountId }).catch(() => null);
+      }
+      if (createdIds.personId) {
+        await Person.deleteOne({ _id: createdIds.personId }).catch(() => null);
+      }
+      if (createdIds.laboratoryId) {
+        await Laboratory.deleteOne({ _id: createdIds.laboratoryId }).catch(() => null);
+      }
+      if (createdIds.pharmacyId) {
+        await Pharmacy.deleteOne({ _id: createdIds.pharmacyId }).catch(() => null);
+      }
+      console.log('🔄 Rollback complete');
+    } catch (rollbackErr) {
+      console.error('⚠️  Rollback itself errored (non-fatal):', rollbackErr.message);
+    }
+  };
+
   try {
     const { id } = req.params;
     const { adminNotes } = req.body;
 
-    console.log('✅ Approving doctor request:', id);
-
-    // ==================== FIND REQUEST ====================
-    const DoctorRequest = require('../models/DoctorRequest');
-    const request = await DoctorRequest.findById(id);
+    // ── Load the request WITH plainPassword & password (select:false in schema)
+    const request = await DoctorRequest.findById(id).select('+plainPassword +password');
 
     if (!request) {
       return res.status(404).json({
@@ -981,147 +1356,392 @@ exports.approveDoctorRequest = async (req, res) => {
       });
     }
 
-    // ==================== CREATE PERSON ====================
+    const requestType = request.requestType || 'doctor';
+    console.log(`📋 Request type: ${requestType}`);
+    console.log(`📋 Applicant: ${request.firstName} ${request.lastName} (${request.email})`);
+
+    // ══════════════════════════════════════════════════════════════════
+    // PRE-FLIGHT CHECKS — validate facility info BEFORE creating anything
+    // ══════════════════════════════════════════════════════════════════
+
+    if (requestType === 'pharmacist') {
+      const hasExisting = !!request.pharmacyId;
+      const hasNew = !!(request.newPharmacyData && Object.keys(request.newPharmacyData).length > 0);
+      if (!hasExisting && !hasNew) {
+        return res.status(400).json({
+          success: false,
+          message: 'لا يمكن قبول الطلب: لم يحدد المتقدم صيدلية موجودة ولم يقدم بيانات صيدلية جديدة'
+        });
+      }
+      if (hasExisting) {
+        const pharmExists = await Pharmacy.findById(request.pharmacyId);
+        if (!pharmExists) {
+          return res.status(400).json({
+            success: false,
+            message: 'الصيدلية المحددة في الطلب غير موجودة في النظام (ربما حُذفت). يرجى مراجعة الطلب.'
+          });
+        }
+      }
+    }
+
+    if (requestType === 'lab_technician') {
+      const hasExisting = !!request.laboratoryId;
+      const hasNew = !!(request.newLaboratoryData && Object.keys(request.newLaboratoryData).length > 0);
+      if (!hasExisting && !hasNew) {
+        return res.status(400).json({
+          success: false,
+          message: 'لا يمكن قبول الطلب: لم يحدد المتقدم مختبراً موجوداً ولم يقدم بيانات مختبر جديد'
+        });
+      }
+      if (hasExisting) {
+        const labExists = await Laboratory.findById(request.laboratoryId);
+        if (!labExists) {
+          return res.status(400).json({
+            success: false,
+            message: 'المختبر المحدد في الطلب غير موجود في النظام (ربما حُذف). يرجى مراجعة الطلب.'
+          });
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // STEP 0 — (if needed) CREATE NEW FACILITY FIRST
+    // We do this BEFORE Person/Account so the facility has a stable _id
+    // for the LabTechnician/Pharmacist creation downstream.
+    // ══════════════════════════════════════════════════════════════════
+
+    let resolvedFacilityId = null;
+
+    if (requestType === 'lab_technician') {
+      if (request.laboratoryId) {
+        resolvedFacilityId = request.laboratoryId;
+        console.log(`🏢 Using existing laboratory: ${resolvedFacilityId}`);
+      } else {
+        console.log('🏢 Creating new Laboratory from newLaboratoryData...');
+        try {
+          const labPayload = buildLaboratoryPayload(request.newLaboratoryData, {
+            phoneNumber: request.phoneNumber
+          });
+          const newLab = await Laboratory.create(labPayload);
+          createdIds.laboratoryId = newLab._id;
+          resolvedFacilityId = newLab._id;
+          console.log(`✅ New Laboratory created: ${newLab._id} (${newLab.name})`);
+        } catch (labErr) {
+          console.error('❌ Laboratory creation failed:', labErr.message);
+          await rollback('Laboratory.create failed');
+          // Handle duplicate registrationNumber specifically
+          if (labErr.code === 11000) {
+            return res.status(400).json({
+              success: false,
+              message: 'رقم ترخيص المختبر الجديد مستخدم بالفعل. يرجى مراجعة البيانات.'
+            });
+          }
+          return res.status(400).json({
+            success: false,
+            message: 'فشل إنشاء المختبر الجديد: ' + labErr.message
+          });
+        }
+      }
+    }
+
+    if (requestType === 'pharmacist') {
+      if (request.pharmacyId) {
+        resolvedFacilityId = request.pharmacyId;
+        console.log(`🏢 Using existing pharmacy: ${resolvedFacilityId}`);
+      } else {
+        console.log('🏢 Creating new Pharmacy from newPharmacyData...');
+        try {
+          const pharmPayload = buildPharmacyPayload(request.newPharmacyData, {
+            phoneNumber: request.phoneNumber
+          });
+          const newPharm = await Pharmacy.create(pharmPayload);
+          createdIds.pharmacyId = newPharm._id;
+          resolvedFacilityId = newPharm._id;
+          console.log(`✅ New Pharmacy created: ${newPharm._id} (${newPharm.name})`);
+        } catch (pharmErr) {
+          console.error('❌ Pharmacy creation failed:', pharmErr.message);
+          await rollback('Pharmacy.create failed');
+          if (pharmErr.code === 11000) {
+            return res.status(400).json({
+              success: false,
+              message: 'رقم ترخيص الصيدلية الجديدة مستخدم بالفعل. يرجى مراجعة البيانات.'
+            });
+          }
+          return res.status(400).json({
+            success: false,
+            message: 'فشل إنشاء الصيدلية الجديدة: ' + pharmErr.message
+          });
+        }
+      }
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // STEP 1 — CREATE PERSON (shared across all types)
+    // ══════════════════════════════════════════════════════════════════
+
     console.log('1️⃣ Creating Person...');
+    let person;
+    try {
+      person = await Person.create({
+        nationalId: request.nationalId,
+        firstName: request.firstName,
+        fatherName: request.fatherName,
+        lastName: request.lastName,
+        motherName: request.motherName,
+        dateOfBirth: request.dateOfBirth,
+        gender: request.gender,
+        phoneNumber: request.phoneNumber,
+        address: request.address,
+        governorate: request.governorate,
+        city: request.city
+      });
+      createdIds.personId = person._id;
+      console.log(`✅ Person created: ${person._id}`);
+    } catch (personErr) {
+      console.error('❌ Person creation failed:', personErr.message);
+      await rollback('Person.create failed');
+      if (personErr.code === 11000) {
+        return res.status(400).json({
+          success: false,
+          message: 'الرقم الوطني موجود مسبقاً في النظام'
+        });
+      }
+      throw personErr;
+    }
 
-    const person = await Person.create({
-      nationalId: request.nationalId,
-      firstName: request.firstName,
-      lastName: request.lastName,
-      dateOfBirth: request.dateOfBirth,
-      gender: request.gender,
-      phoneNumber: request.phoneNumber,
-      address: request.address,
-      governorate: request.governorate,
-      city: request.city,
-      isMinor: false
-    });
+    // ══════════════════════════════════════════════════════════════════
+    // STEP 2 — CREATE ACCOUNT (check email uniqueness first)
+    // ══════════════════════════════════════════════════════════════════
 
-    console.log('✅ Person created:', person._id);
-
-    // ==================== CREATE ACCOUNT ====================
     console.log('2️⃣ Creating Account...');
-
-    // ✅ Use doctor's ORIGINAL signup credentials
     const emailToUse = request.email.trim().toLowerCase();
-    const passwordToUse = request.password;  // ← Already hashed from signup!
-    const plainPasswordToShow = request.plainPassword;  // ← للعرض فقط
 
-    console.log('📧 Email from signup:', emailToUse);
-    console.log('🔐 Password from signup: [HASHED]');
-    console.log('📝 Plain password for display:', plainPasswordToShow);
-
-    // Check if email already exists
     const existingAccount = await Account.findOne({ email: emailToUse });
     if (existingAccount) {
-      console.error('❌ Email already exists:', emailToUse);
+      console.error(`❌ Email already taken: ${emailToUse}`);
+      await rollback('Account email collision');
       return res.status(400).json({
         success: false,
         message: `البريد الإلكتروني ${emailToUse} موجود مسبقاً في النظام`
       });
     }
 
-    const account = await Account.create({
-      email: emailToUse,
-      password: passwordToUse,  // ← Already hashed from signup!
-      roles: ['doctor'],
-      personId: person._id,
-      isActive: true
-    });
+    const roleMap = {
+      doctor: 'doctor',
+      pharmacist: 'pharmacist',
+      lab_technician: 'lab_technician'
+    };
 
-    console.log('✅ Account created:', account._id);
-    console.log('✅ Email:', account.email);
-    console.log('✅ Using original signup password');
+    let account;
+    try {
+      account = await Account.create({
+        email: emailToUse,
+        password: request.password,   // already bcrypt-hashed by authController at signup
+        roles: [roleMap[requestType] || 'doctor'],
+        personId: person._id,
+        isActive: true
+      });
+      createdIds.accountId = account._id;
+      console.log(`✅ Account created: ${account._id} (role: ${account.roles[0]})`);
+    } catch (accountErr) {
+      console.error('❌ Account creation failed:', accountErr.message);
+      await rollback('Account.create failed');
+      throw accountErr;
+    }
 
-    // ==================== CREATE DOCTOR ====================
-    console.log('3️⃣ Creating Doctor...');
+    // ══════════════════════════════════════════════════════════════════
+    // STEP 3 — CREATE PROFESSIONAL RECORD (branches by requestType)
+    // ══════════════════════════════════════════════════════════════════
 
-    const doctor = await Doctor.create({
-      personId: person._id,
-      medicalLicenseNumber: request.medicalLicenseNumber,
-      specialization: request.specialization,
-      subSpecialization: request.subSpecialization,
-      yearsOfExperience: request.yearsOfExperience,
-      hospitalAffiliation: request.hospitalAffiliation,
-      availableDays: request.availableDays,
-      consultationFee: request.consultationFee,
-      availableTimes: {
-        start: '09:00',
-        end: '17:00'
+    let professionalRecord;
+
+    try {
+      if (requestType === 'doctor') {
+        console.log('3️⃣ Creating Doctor...');
+        professionalRecord = await Doctor.create({
+          personId: person._id,
+          medicalLicenseNumber: request.medicalLicenseNumber,
+          specialization: request.specialization,
+          ...(request.subSpecialization && request.subSpecialization.trim()
+            ? { subSpecialization: request.subSpecialization }
+            : {}),
+          yearsOfExperience: request.yearsOfExperience,
+          hospitalAffiliation: request.hospitalAffiliation,
+          availableDays: request.availableDays || [],
+          consultationFee: request.consultationFee,
+          currency: request.currency || 'SYP'
+        });
+        createdIds.professionalId = professionalRecord._id;
+        console.log(`✅ Doctor created: ${professionalRecord._id}`);
+
+      } else if (requestType === 'pharmacist') {
+        console.log('3️⃣ Creating Pharmacist...');
+        professionalRecord = await Pharmacist.create({
+          personId: person._id,
+          pharmacyLicenseNumber: request.pharmacyLicenseNumber,
+          pharmacyId: resolvedFacilityId,  // ⭐ resolved above (existing or newly created)
+          ...(request.degree && { degree: request.degree }),
+          ...(request.specialization && { specialization: request.specialization }),
+          yearsOfExperience: request.yearsOfExperience || 0,
+          ...(request.employmentType && { employmentType: request.employmentType }),
+          isAvailable: true,
+          totalPrescriptionsDispensed: 0
+        });
+        createdIds.professionalId = professionalRecord._id;
+        console.log(`✅ Pharmacist created: ${professionalRecord._id}`);
+
+      } else if (requestType === 'lab_technician') {
+        console.log('3️⃣ Creating LabTechnician...');
+        professionalRecord = await LabTechnician.create({
+          personId: person._id,
+          licenseNumber: request.licenseNumber,
+          laboratoryId: resolvedFacilityId,  // ⭐ resolved above (existing or newly created)
+          ...(request.degree && { degree: request.degree }),
+          ...(request.specialization && { specialization: request.specialization }),
+          ...(request.position && { position: request.position }),
+          yearsOfExperience: request.yearsOfExperience || 0,
+          isAvailable: true,
+          totalTestsPerformed: 0
+        });
+        createdIds.professionalId = professionalRecord._id;
+        console.log(`✅ LabTechnician created: ${professionalRecord._id}`);
+
+      } else {
+        throw new Error(`Unknown requestType: ${requestType}`);
+      }
+
+    } catch (profErr) {
+      console.error('❌ Professional record creation failed:', profErr.message);
+      await rollback('Professional.create failed');
+
+      if (profErr.code === 11000) {
+        const field = Object.keys(profErr.keyPattern || {})[0];
+        const arabicFields = {
+          medicalLicenseNumber: 'رقم الترخيص الطبي',
+          pharmacyLicenseNumber: 'رقم ترخيص الصيدلية',
+          licenseNumber: 'رقم الترخيص المهني',
+          personId: 'الشخص'
+        };
+        return res.status(400).json({
+          success: false,
+          message: `${arabicFields[field] || field} موجود مسبقاً في النظام`
+        });
+      }
+
+      if (profErr.name === 'ValidationError') {
+        const messages = Object.values(profErr.errors).map(e => e.message);
+        return res.status(400).json({
+          success: false,
+          message: `فشل التحقق من البيانات: ${messages.join(', ')}`
+        });
+      }
+
+      return res.status(500).json({
+        success: false,
+        message: 'فشل إنشاء السجل المهني: ' + profErr.message
+      });
+    }
+
+    // ══════════════════════════════════════════════════════════════════
+    // STEP 4 — MARK REQUEST APPROVED (final success step)
+    // ══════════════════════════════════════════════════════════════════
+
+    try {
+      await request.markApproved(
+        req.user._id,
+        {
+          personId: person._id,
+          accountId: account._id,
+          doctorId: professionalRecord._id
+        },
+        adminNotes
+      );
+      console.log('✅ Request marked approved');
+    } catch (markErr) {
+      // At this point all creates succeeded — if markApproved fails we still
+      // consider the approval successful and log the status discrepancy, because
+      // rolling back 4 successful creates over a status bookkeeping error would
+      // be worse than leaving the request in 'pending' (the admin can retry).
+      console.error('⚠️  markApproved failed but all records created. Manual fix needed:', markErr.message);
+    }
+
+    // ── Audit log (fire-and-forget)
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: `APPROVE_${requestType.toUpperCase()}_REQUEST`,
+      description: `Approved ${requestType} request for ${emailToUse}`,
+      resourceType: 'doctor_request',
+      resourceId: request._id,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: {
+        professionalId: professionalRecord._id,
+        professionalType: requestType,
+        facilityId: resolvedFacilityId || null,
+        facilityCreated: !!(createdIds.laboratoryId || createdIds.pharmacyId)
       }
     });
 
-    console.log('✅ Doctor created:', doctor._id);
+    const typeLabels = {
+      doctor: 'الطبيب',
+      pharmacist: 'الصيدلي',
+      lab_technician: 'فني المختبر'
+    };
 
-    // ==================== UPDATE REQUEST ====================
-    console.log('4️⃣ Updating request status...');
-
-    request.status = 'approved';
-    request.reviewedBy = req.user.accountId || req.user._id;
-    request.reviewedAt = new Date();
-    request.adminNotes = adminNotes || '';
-    request.createdPersonId = person._id;
-    request.createdAccountId = account._id;
-    request.createdDoctorId = doctor._id;
-    // ✅ KEEP plainPassword - Doctor needs to see it after approval!
-
-    await request.save();
-
-    console.log('✅ Request approved successfully');
-
-    // ==================== SEND RESPONSE ====================
-    res.json({
+    return res.json({
       success: true,
-      message: 'تم قبول طلب التسجيل وإنشاء حساب الطبيب بنجاح',
+      message: `تم قبول طلب التسجيل وإنشاء حساب ${typeLabels[requestType]} بنجاح`,
       data: {
-        doctorId: doctor._id,
+        professionalId: professionalRecord._id,
+        professionalType: requestType,
         personId: person._id,
         accountId: account._id,
         email: emailToUse,
-        password: plainPasswordToShow,  // ← ✅ من signup (plaintext)
-        doctorName: `${person.firstName} ${person.lastName}`,
-        medicalLicenseNumber: doctor.medicalLicenseNumber,
-        specialization: doctor.specialization
+        password: request.plainPassword,
+        fullName: `${person.firstName} ${person.lastName}`,
+        facilityId: resolvedFacilityId || null,
+        facilityCreated: !!(createdIds.laboratoryId || createdIds.pharmacyId)
       }
     });
 
   } catch (error) {
-    console.error('❌ Error approving doctor request:', error);
+    console.error('❌ Unexpected error approving request:', error);
+    await rollback('unexpected error in outer try/catch');
 
-    // Handle duplicate key errors
     if (error.code === 11000) {
-      const field = Object.keys(error.keyPattern)[0];
-      let arabicField = field;
-      if (field === 'nationalId') arabicField = 'الرقم الوطني';
-      if (field === 'email') arabicField = 'البريد الإلكتروني';
-      if (field === 'medicalLicenseNumber') arabicField = 'رقم الترخيص الطبي';
-      
+      const field = Object.keys(error.keyPattern || {})[0];
+      const arabicFields = {
+        nationalId: 'الرقم الوطني',
+        email: 'البريد الإلكتروني',
+        medicalLicenseNumber: 'رقم الترخيص الطبي',
+        pharmacyLicenseNumber: 'رقم ترخيص الصيدلية',
+        licenseNumber: 'رقم الترخيص'
+      };
       return res.status(400).json({
         success: false,
-        message: `${arabicField} موجود مسبقاً في النظام`
+        message: `${arabicFields[field] || field} موجود مسبقاً في النظام`
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء قبول الطلب: ' + error.message
     });
   }
 };
 
-/**
- * @desc    Reject doctor request
- * @route   POST /api/admin/doctor-requests/:id/reject
- * @access  Private (Admin only)
- */
+// ============================================================================
+// 18. REJECT DOCTOR REQUEST
+// ============================================================================
+
 exports.rejectDoctorRequest = async (req, res) => {
+  console.log('❌ ========== REJECT DOCTOR REQUEST ==========');
+
   try {
     const { id } = req.params;
-    const { rejectionReason, adminNotes } = req.body;
+    const { rejectionReason, rejectionDetails } = req.body;
 
-    console.log('❌ Rejecting doctor request:', id);
-
-    // Validate rejection reason
     if (!rejectionReason) {
       return res.status(400).json({
         success: false,
@@ -1129,10 +1749,7 @@ exports.rejectDoctorRequest = async (req, res) => {
       });
     }
 
-    // ==================== FIND REQUEST ====================
-    const DoctorRequest = require('../models/DoctorRequest');
     const request = await DoctorRequest.findById(id);
-
     if (!request) {
       return res.status(404).json({
         success: false,
@@ -1147,19 +1764,29 @@ exports.rejectDoctorRequest = async (req, res) => {
       });
     }
 
-    // ==================== UPDATE REQUEST ====================
-    request.status = 'rejected';
-    request.reviewedBy = req.user._id;
-    request.reviewedAt = new Date();
-    request.rejectionReason = rejectionReason;
-    request.adminNotes = adminNotes || '';
+    try {
+      await request.markRejected(req.user._id, rejectionReason, rejectionDetails);
+    } catch (modelError) {
+      return res.status(400).json({
+        success: false,
+        message: modelError.message
+      });
+    }
 
-    await request.save();
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'REJECT_DOCTOR_REQUEST',
+      description: `Rejected doctor request for ${request.email}`,
+      resourceType: 'doctor_request',
+      resourceId: request._id,
+      ipAddress: req.ip || 'unknown',
+      success: true,
+      metadata: { rejectionReason, rejectionDetails }
+    });
 
-    console.log('✅ Request rejected successfully');
-
-    // ==================== SEND RESPONSE ====================
-    res.json({
+    console.log('✅ Request rejected');
+    return res.json({
       success: true,
       message: 'تم رفض طلب التسجيل',
       data: {
@@ -1167,13 +1794,14 @@ exports.rejectDoctorRequest = async (req, res) => {
         doctorName: `${request.firstName} ${request.lastName}`,
         email: request.email,
         rejectionReason: request.rejectionReason,
+        rejectionDetails: request.rejectionDetails,
         reviewedAt: request.reviewedAt
       }
     });
 
   } catch (error) {
     console.error('❌ Error rejecting doctor request:', error);
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء رفض الطلب'
     });

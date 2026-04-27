@@ -29,7 +29,7 @@ body {
   direction: rtl;
   margin: 0;
   background-color: var(--tm-background, #F5FAFA);
-  color: var(--tm-text-primary, #0D3B3E);
+  color: var(--tm-text, #1f2937);
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
   transition: background-color 0.3s ease, color 0.3s ease;

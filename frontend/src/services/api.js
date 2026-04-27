@@ -1402,6 +1402,184 @@ export const doctorAPI = {
       throw { message: errorMessage, ...error.response?.data };
     }
   }
+  ,
+
+  // ════════════════════════════════════════════════════════════════
+  // SECTION 11 — المختبرات وطلبات التحاليل
+  // ────────────────────────────────────────────────────────────────
+  // يُمكّن الطبيب من اختيار مختبر من قائمة وإنشاء طلب تحليل.
+  // طلب التحليل يُربط بالزيارة عبر visitId، فيعرف فني المختبر
+  // أن هذا الطلب جاء من زيارة معينة عند البحث عن المريض برقمه
+  // الوطني في صفحة "تسجيل العينات" الخاصة به.
+  //
+  // الـ Backend Endpoints:
+  //   GET  /api/laboratories               → قائمة المختبرات النشطة
+  //   GET  /api/laboratories/:id           → مختبر واحد + testCatalog
+  //   POST /api/lab-tests                  → إنشاء طلب تحليل جديد
+  //
+  // كل الـ endpoints تتطلب JWT بدور 'doctor'.
+  // ════════════════════════════════════════════════════════════════
+
+  /**
+   * GET /api/laboratories
+   *
+   * يُرجع قائمة بكل المختبرات النشطة في النظام. اختيارياً يمكن
+   * الفلترة حسب المحافظة لإظهار مختبرات منطقة المريض أولاً.
+   *
+   * الباك يجب أن يُرجع فقط المختبرات حيث:
+   *   isActive = true AND isAcceptingTests = true
+   *
+   * @param {string} [governorate] - فلتر اختياري (مثل 'damascus', 'tartus')
+   * @returns {Promise<{
+   *   success: boolean,
+   *   laboratories: Array<{
+   *     _id: string,
+   *     name: string,
+   *     arabicName?: string,
+   *     governorate: string,
+   *     city: string,
+   *     district?: string,
+   *     address: string,
+   *     phoneNumber: string,
+   *     labType?: 'independent'|'hospital_based'|'clinic_based'|'specialized',
+   *     averageRating?: number,
+   *     totalReviews?: number,
+   *     isAcceptingTests?: boolean,
+   *     testCatalogCount?: number
+   *   }>
+   * }>}
+   */
+  getLaboratories: async (governorate) => {
+    try {
+      const params = governorate ? { governorate } : {};
+      const response = await api.get('/laboratories', { params });
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+                        || error.message
+                        || 'حدث خطأ في تحميل قائمة المختبرات';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * GET /api/laboratories/:id
+   *
+   * يُرجع تفاصيل مختبر واحد بما فيها قائمة التحاليل التي يقدمها
+   * (testCatalog مثل CBC, FBS, HbA1c). تُستخدم لإظهار "ماذا يقدم
+   * هذا المختبر" حتى يختار الطبيب من قائمة حقيقية بدلاً من كتابة
+   * نص حر.
+   *
+   * @param {string} laboratoryId
+   * @returns {Promise<{
+   *   success: boolean,
+   *   laboratory: {
+   *     _id: string,
+   *     name: string,
+   *     arabicName?: string,
+   *     governorate: string,
+   *     city: string,
+   *     phoneNumber: string,
+   *     testCatalog: Array<{
+   *       testCode: string,        // مثل 'CBC', 'FBS', 'HbA1c'
+   *       testName: string,        // الاسم بالإنجليزية
+   *       arabicName?: string,     // الاسم بالعربية
+   *       category?: 'blood'|'urine'|'stool'|'imaging'|'microbiology'|'molecular'|'biopsy'|'other',
+   *       price?: number,
+   *       turnaroundTime?: string,
+   *       isAvailable?: boolean
+   *     }>
+   *   }
+   * }>}
+   */
+  getLaboratoryById: async (laboratoryId) => {
+    if (!laboratoryId) {
+      throw { message: 'معرّف المختبر مطلوب' };
+    }
+    try {
+      const response = await api.get(`/laboratories/${laboratoryId}`);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+                        || error.message
+                        || 'حدث خطأ في تحميل بيانات المختبر';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  },
+
+  /**
+   * POST /api/lab-tests
+   *
+   * يُنشئ طلب تحليل جديد. الطبيب الحالي هو orderedBy. فني المختبر
+   * المختار سيرى الطلب في قائمة الطلبات المعلقة عند بحثه عن المريض
+   * بالرقم الوطني.
+   *
+   * يجب على الباك أن:
+   *   1. يتحقق من الحقول المطلوبة (laboratoryId, testsOrdered, مرجع المريض)
+   *   2. يُولد testNumber بصيغة: LAB-YYYYMMDD-XXXXX
+   *   3. يضع status='ordered', orderDate=now, orderedBy=req.user._id
+   *   4. يضع isViewedByDoctor=false, isViewedByPatient=false
+   *   5. إذا priority='stat'، يُنشئ in-app notification لكل فنيي
+   *      المختبر بـ priority='urgent' و type='lab_test_stat_priority'
+   *   6. يُرجع وثيقة الـ lab test المُنشأة
+   *
+   * أسماء الحقول مطابقة لـ lab_tests collection في
+   * patient360_db_final.js بالضبط — patientPersonId / patientChildId
+   * (واحد منهم مطلوب)، وليس patientId. testsOrdered مصفوفة من
+   * {testCode, testName, notes}.
+   *
+   * @param {{
+   *   patientPersonId?: string,        // للبالغين (واحد منهم مطلوب)
+   *   patientChildId?: string,         // للأطفال (واحد منهم مطلوب)
+   *   laboratoryId: string,            // مطلوب — أي مختبر سيُجري التحاليل
+   *   visitId?: string,                // اختياري — ربط بالزيارة
+   *   testsOrdered: Array<{
+   *     testCode: string,              // مثل 'CBC' أو 'CUSTOM-1'
+   *     testName: string,              // اسم التحليل
+   *     notes?: string                 // ملاحظات لكل تحليل (اختياري)
+   *   }>,
+   *   testCategory?: 'blood'|'urine'|'stool'|'imaging'|'biopsy'|'microbiology'|'molecular'|'other',
+   *   priority?: 'routine'|'urgent'|'stat',  // الافتراضي 'routine'
+   *   scheduledDate?: string,          // ISO date — موعد متوقع للمريض
+   *   sampleType?: 'blood'|'urine'|'stool'|'tissue'|'swab'|'saliva'|'other',
+   *   labNotes?: string                // ملاحظة عامة للمختبر
+   * }} payload
+   * @returns {Promise<{
+   *   success: boolean,
+   *   labTest: {
+   *     _id: string,
+   *     testNumber: string,            // مثل 'LAB-20260422-00001'
+   *     status: 'ordered',
+   *     priority: string,
+   *     laboratoryId: string,
+   *     orderDate: string,
+   *     testsOrdered: Array<object>
+   *   }
+   * }>}
+   */
+  createLabTest: async (payload) => {
+    // التحقق من جانب العميل قبل إرسال الطلب — يعطي رسائل عربية واضحة.
+    if (!payload || typeof payload !== 'object') {
+      throw { message: 'بيانات الطلب غير صالحة' };
+    }
+    
+    if (!Array.isArray(payload.testsOrdered) || payload.testsOrdered.length === 0) {
+      throw { message: 'الرجاء إضافة تحليل واحد على الأقل' };
+    }
+    if (!payload.patientPersonId && !payload.patientChildId) {
+      throw { message: 'بيانات المريض غير مكتملة' };
+    }
+
+    try {
+      const response = await api.post('/lab-tests', payload);
+      return response.data;
+    } catch (error) {
+      const errorMessage = error.response?.data?.message
+                        || error.message
+                        || 'حدث خطأ في إرسال طلب التحاليل';
+      throw { message: errorMessage, ...error.response?.data };
+    }
+  }
 };
 
 // ============================================

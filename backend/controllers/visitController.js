@@ -1,529 +1,809 @@
-const Visit = require('../models/Visit');
-const Person = require('../models/Person');
-const Doctor = require('../models/Doctor');
-const Patient = require('../models/Patient');
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Visit Controller — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Visit (clinical encounter) endpoints mounted under /api/visits.
+ *
+ *  Patient resolution:
+ *    The frontend can identify the patient by either:
+ *      - patientNationalId (11 digits) → looks up Person/Children
+ *      - patientPersonId / patientChildId (ObjectId) → direct
+ *      - childRegistrationNumber (CRN-...) → looks up Children
+ *    The controller normalizes whatever is sent into the dual-ref pattern.
+ *
+ *  Functions:
+ *    1. createVisit       — Create new clinical visit
+ *    2. getPatientVisits  — List visits for one patient
+ *    3. getDoctorVisits   — List visits for one doctor
+ *    4. getVisitById      — Single visit detail
+ *    5. updateVisit       — Update visit fields (with ownership check)
+ *    6. completeVisit     — Mark visit completed + update patient stats
+ *    7. deleteVisit       — Soft-delete (admin only)
+ *
+ *  Conventions kept from existing code:
+ *    - Arabic error messages, emoji-marked console logs
+ *    - { success, message, [data] } response shape
+ *    - Try/catch in every async function
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
-// ==========================================
-// DOCTOR FUNCTIONS
-// ==========================================
+const {
+  Visit, Person, Children, Patient, Doctor, AuditLog, LabTest
+} = require('../models');
+
+// ============================================================================
+// HELPER: Resolve patient identifier into { patientPersonId | patientChildId }
+// ============================================================================
 
 /**
- * @route   POST /api/doctor/patient/:nationalId/visit
- * @desc    Create a new visit for a patient (WITH FILE UPLOAD SUPPORT)
- * @access  Private (Doctor only)
+ * The frontend sends one of: patientNationalId, patientPersonId,
+ * patientChildId, childRegistrationNumber. Normalize into the dual-ref shape.
+ *
+ * @returns {{ patientPersonId?: ObjectId, patientChildId?: ObjectId } | null}
+ */
+async function resolvePatientRef(body) {
+  const {
+    patientNationalId,
+    patientPersonId,
+    patientChildId,
+    childRegistrationNumber
+  } = body;
+
+  // Direct ObjectId provided
+  if (patientPersonId) {
+    return { patientPersonId };
+  }
+  if (patientChildId) {
+    return { patientChildId };
+  }
+
+  // Lookup by CRN
+  if (childRegistrationNumber) {
+    const child = await Children.findOne({ childRegistrationNumber }).lean();
+    return child ? { patientChildId: child._id } : null;
+  }
+
+  // Lookup by national ID — could be adult OR child (with assigned nationalId)
+  if (patientNationalId) {
+    const adult = await Person.findOne({ nationalId: patientNationalId }).lean();
+    if (adult) return { patientPersonId: adult._id };
+
+    const child = await Children.findOne({ nationalId: patientNationalId }).lean();
+    if (child) return { patientChildId: child._id };
+  }
+
+  return null;
+}
+
+// ============================================================================
+// 1. CREATE VISIT
+// ============================================================================
+
+/**
+ * @route   POST /api/visits
+ * @desc    Create a new clinical visit
+ * @access  Private (doctor, dentist)
+ *
+ * Body:
+ *   visitType (required)         — regular | follow_up | emergency | consultation | dental | lab_only
+ *   chiefComplaint (required)    — patient's main complaint
+ *   patient identifier (one of)  — patientNationalId | patientPersonId | patientChildId | childRegistrationNumber
+ *   doctorId / dentistId         — provider (one required)
+ *   diagnosis                    — optional
+ *   vitalSigns                   — optional structured object (9 fields)
+ *   prescribedMedications        — optional array
+ *   doctorNotes                  — optional
+ *   followUpDate, followUpNotes  — optional
+ *   visitPhotoUrl                — optional (X-ray, scan)
+ *   appointmentId                — optional link to source appointment
+ *   hospitalId                   — optional
  */
 exports.createVisit = async (req, res) => {
+  console.log('🔵 ========== CREATE VISIT ==========');
+
   try {
-    const { nationalId } = req.params;
+    // ── HELPERS ──────────────────────────────────────────────────────────
+    // Multipart form data can only carry strings, so nested objects and
+    // arrays arrive as JSON-encoded strings. Parse them before validating.
+    const parseIfJSON = (value) => {
+      if (value == null || value === '') return undefined;
+      if (typeof value !== 'string') return value;
+      try {
+        return JSON.parse(value);
+      } catch {
+        return value;
+      }
+    };
+
+    // Mongoose min/max validators reject empty strings. Strip empty-string
+    // keys from optional sub-documents so blank fields don't break the save.
+    const stripEmpty = (obj) => {
+      if (!obj || typeof obj !== 'object') return obj;
+      const cleaned = {};
+      Object.entries(obj).forEach(([k, v]) => {
+        if (v !== '' && v !== null && v !== undefined) cleaned[k] = v;
+      });
+      return Object.keys(cleaned).length > 0 ? cleaned : undefined;
+    };
+
+    // ── DESTRUCTURE BODY ─────────────────────────────────────────────────
     const {
+      visitType,
       chiefComplaint,
+      doctorId,
+      dentistId,
+      hospitalId,
       diagnosis,
-      prescribedMedications,
       doctorNotes,
-      visitType
+      followUpDate,
+      followUpNotes,
+      visitPhotoUrl,
+      appointmentId
     } = req.body;
 
-    console.log('🔵 ========== CREATE VISIT REQUEST ==========');
-    console.log('📋 National ID:', nationalId);
-    console.log('📝 Chief Complaint:', chiefComplaint);
-    console.log('🔬 Diagnosis:', diagnosis);
-    console.log('📷 File uploaded:', req.file ? 'YES' : 'NO');
-    if (req.file) {
-      console.log('📁 File name:', req.file.filename);
-      console.log('📁 File size:', req.file.size, 'bytes');
-    }
+    // Fields that may arrive as JSON strings (multipart)
+    const vitalSigns = stripEmpty(parseIfJSON(req.body.vitalSigns));
+    const prescribedMedications = parseIfJSON(req.body.prescribedMedications);
+    const ecgAnalysis = parseIfJSON(req.body.ecgAnalysis);
 
-   // Find patient by national ID or child ID
-    console.log('🔍 Searching for person:', nationalId);
-    
-    const person = await Person.findOne({
-      $or: [
-        { nationalId: nationalId },
-        { childId: nationalId }
-      ]
-    }).lean();
-    
-    console.log('📥 Person found:', person ? '✅' : '❌');
-    
-    if (!person) {
-      return res.status(404).json({
-        success: false,
-        message: 'لم يتم العثور على المريض'
-      });
-    }
+    // ── 1. AUTO-RESOLVE PROVIDER ID FROM JWT ─────────────────────────────
+    // The caller is already authenticated, so we trust the token to tell us
+    // who the provider is instead of asking the frontend to re-declare it.
+    let resolvedDoctorId = doctorId;
+    let resolvedDentistId = dentistId;
 
-    // Get doctor ID from authenticated user
-    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-    if (!doctor) {
-      return res.status(404).json({
-        success: false,
-        message: 'لم يتم العثور على بيانات الطبيب'
-      });
-    }
-
-    // Parse medications if it's a JSON string
-    let parsedMedications = [];
-    if (prescribedMedications) {
-      try {
-        parsedMedications = typeof prescribedMedications === 'string' 
-          ? JSON.parse(prescribedMedications) 
-          : prescribedMedications;
-      } catch (e) {
-        console.error('Error parsing medications:', e);
+    if (!resolvedDoctorId && !resolvedDentistId && req.user?.personId) {
+      if (req.user.roles?.includes('doctor')) {
+        const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
+        if (doctor) resolvedDoctorId = doctor._id;
+      } else if (req.user.roles?.includes('dentist')) {
+        try {
+          const Dentist = require('../models/Dentist');
+          const dentist = await Dentist.findOne({ personId: req.user.personId }).lean();
+          if (dentist) resolvedDentistId = dentist._id;
+        } catch (e) {
+          console.warn('⚠️  Dentist model not available');
+        }
       }
     }
 
-    // Create visit object
-    const visitData = {
-      patientId: person._id,
-      doctorId: doctor._id,
-      visitDate: new Date(),
-      visitType: visitType || 'regular',
-      status: 'completed',
-      chiefComplaint,
-      diagnosis,
-      prescribedMedications: parsedMedications || [],
-      doctorNotes: doctorNotes || ''
-    };
-
-    // ✅ ADD ATTACHMENT IF FILE WAS UPLOADED
-    if (req.file) {
-      // Get the account ID - try multiple possible fields
-      const accountId = req.user._id || req.user.accountId || req.user.id;
-      
-      console.log('👤 User ID for uploadedBy:', accountId);
-      console.log('👤 User object keys:', Object.keys(req.user));
-      
-      const attachment = {
-        fileName: req.file.originalname,
-        fileType: req.file.mimetype.startsWith('image/') ? 'image' : 'pdf',
-        mimeType: req.file.mimetype,
-        fileSize: req.file.size,
-        filePath: req.file.path,
-        fileUrl: `/uploads/visits/${req.file.filename}`,
-        description: 'Visit attachment',
-        uploadedBy: accountId,
-        uploadedAt: new Date()
-      };
-
-      visitData.attachments = [attachment];
-      console.log('✅ Attachment added to visit data');
-    }
-
-    // Create visit
-    const visit = await Visit.create(visitData);
-
-    // Populate patient and doctor info
-    await visit.populate([
-      { path: 'patientId', select: 'firstName lastName nationalId' },
-      { path: 'doctorId', select: 'specialization institution' }
-    ]);
-
-    console.log('✅ Visit created successfully');
-    console.log('✅ ==========================================');
-
-    res.status(201).json({
-      success: true,
-      message: 'تم حفظ الزيارة بنجاح',
-      visit
-    });
-
-  } catch (error) {
-    console.error('❌ Error creating visit:', error);
-    
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
+    // ── 2. VALIDATE REQUIRED FIELDS ──────────────────────────────────────
+    if (!visitType) {
       return res.status(400).json({
         success: false,
-        message: 'خطأ في البيانات المدخلة',
-        errors
+        message: 'نوع الزيارة مطلوب'
+      });
+    }
+    if (!chiefComplaint) {
+      return res.status(400).json({
+        success: false,
+        message: 'الشكوى الرئيسية مطلوبة'
+      });
+    }
+    if (!resolvedDoctorId && !resolvedDentistId) {
+      return res.status(400).json({
+        success: false,
+        message: 'يجب تحديد الطبيب أو طبيب الأسنان'
       });
     }
 
-    res.status(500).json({
+    // ── 3. RESOLVE PATIENT REFERENCE ─────────────────────────────────────
+    // The patient ID can arrive three ways:
+    //   • req.params.nationalId  — /patient/:nationalId/visit (doctor dashboard)
+    //   • req.body.patientNationalId — admin-created visits
+    //   • req.body.childRegistrationNumber — pediatric visits
+    // Merge into the shape resolvePatientRef expects.
+    const resolverInput = {
+      ...req.body,
+      patientNationalId: req.body.patientNationalId
+        || req.body.nationalId
+        || req.params.nationalId
+        || req.params.identifier
+    };
+
+    const patientRef = await resolvePatientRef(resolverInput);
+    if (!patientRef) {
+      console.log('❌ Patient not found from any identifier');
+      return res.status(404).json({
+        success: false,
+        message: 'لم يتم العثور على المريض'
+      });
+    }
+    console.log('✅ Patient resolved:', patientRef);
+
+    // ── 3.5 VALIDATE FOLLOW-UP DATE + CONFLICT CHECK ─────────────────────
+    // If the doctor set a follow-up date, we'll auto-generate an appointment
+    // for it (so it shows on the calendar). Before creating the visit, make
+    // sure that date/time doesn't collide with an existing appointment on
+    // this provider's schedule — reject the whole save if it does so we
+    // don't end up with a stranded visit and no follow-up.
+    const FOLLOWUP_DEFAULT_TIME = '09:00';
+    let followUpAppointmentDate = null;
+
+    if (followUpDate) {
+      const followUpObj = new Date(followUpDate);
+      if (isNaN(followUpObj.getTime())) {
+        return res.status(400).json({
+          success: false,
+          message: 'تاريخ المتابعة غير صالح'
+        });
+      }
+
+      // Normalize to start of day — we always pair with FOLLOWUP_DEFAULT_TIME
+      followUpObj.setHours(0, 0, 0, 0);
+
+      const today = new Date();
+      today.setHours(0, 0, 0, 0);
+      if (followUpObj < today) {
+        return res.status(400).json({
+          success: false,
+          message: 'تاريخ المتابعة لا يمكن أن يكون في الماضي'
+        });
+      }
+
+      const Appointment = require('../models/Appointment');
+      const conflictQuery = {
+        appointmentDate: followUpObj,
+        appointmentTime: FOLLOWUP_DEFAULT_TIME,
+        status: { $in: ['scheduled', 'confirmed', 'checked_in', 'in_progress'] }
+      };
+      if (resolvedDoctorId) conflictQuery.doctorId = resolvedDoctorId;
+      if (resolvedDentistId) conflictQuery.dentistId = resolvedDentistId;
+
+      const conflict = await Appointment.findOne(conflictQuery).lean();
+      if (conflict) {
+        const arDate = followUpObj.toLocaleDateString('ar-EG');
+        return res.status(409).json({
+          success: false,
+          message: `هذا التاريخ (${arDate} عند الساعة ${FOLLOWUP_DEFAULT_TIME}) يتعارض مع موعد آخر في جدولك. الرجاء اختيار تاريخ آخر.`
+        });
+      }
+
+      followUpAppointmentDate = followUpObj;
+    }
+
+    // ── 4. CREATE VISIT ──────────────────────────────────────────────────
+    console.log('📝 Creating visit document...');
+    const visit = await Visit.create({
+      visitType,
+      ...patientRef,                                    // patientPersonId OR patientChildId
+      doctorId: resolvedDoctorId || undefined,
+      dentistId: resolvedDentistId || undefined,
+      hospitalId: hospitalId || undefined,
+      appointmentId: appointmentId || undefined,
+      visitDate: new Date(),
+      status: 'in_progress',
+      chiefComplaint: chiefComplaint.trim(),
+      diagnosis: diagnosis?.trim(),
+      vitalSigns: vitalSigns || undefined,
+      prescribedMedications: Array.isArray(prescribedMedications)
+        ? prescribedMedications
+        : [],
+      ecgAnalysis: ecgAnalysis || undefined,
+      doctorNotes: doctorNotes?.trim(),
+      followUpDate: followUpDate ? new Date(followUpDate) : undefined,
+      followUpNotes: followUpNotes?.trim(),
+      visitPhotoUrl: visitPhotoUrl || undefined,
+      visitPhotoUploadedAt: visitPhotoUrl ? new Date() : undefined
+    });
+    console.log('✅ Visit created:', visit._id);
+
+    // ── 4.5 CREATE PRESCRIPTION (if medications were entered) ────────────
+    // We mirror the visit's prescribedMedications into a proper Prescription
+    // document so it shows on the patient's "الوصفات الطبية" tab. Failure
+    // here is logged but doesn't block the visit — the visit is the
+    // source-of-truth record; the prescription is a derived view.
+    let prescription = null;
+    if (Array.isArray(prescribedMedications) && prescribedMedications.length > 0) {
+      try {
+        const Prescription = require('../models/Prescription');
+
+        // RX-YYYYMMDD-XXXXX
+        const now = new Date();
+        const rxNumber = `RX-${now.getFullYear()}`
+          + `${String(now.getMonth() + 1).padStart(2, '0')}`
+          + `${String(now.getDate()).padStart(2, '0')}`
+          + `-${Math.floor(10000 + Math.random() * 90000)}`;
+        const verificationCode = String(Math.floor(100000 + Math.random() * 900000));
+
+        // Expire 30 days from today per schema note
+        const expiryDate = new Date();
+        expiryDate.setDate(expiryDate.getDate() + 30);
+
+        // Normalize each medication entry. Required schema fields:
+        // medicationName, dosage, frequency, duration. Fall back to a dash
+        // so the save doesn't fail when the doctor omitted a field.
+        const normalizedMeds = prescribedMedications
+          .filter((m) => m && (m.medicationName || m.name))
+          .map((m) => ({
+            medicationId: m.medicationId || undefined,
+            medicationName: m.medicationName || m.name || 'غير محدد',
+            arabicName: m.arabicName || undefined,
+            dosage: m.dosage || '—',
+            frequency: m.frequency || '—',
+            duration: m.duration || '—',
+            route: m.route || undefined,
+            instructions: m.instructions || undefined,
+            quantity: typeof m.quantity === 'number' ? m.quantity : undefined,
+            isDispensed: false
+          }));
+
+        if (normalizedMeds.length > 0) {
+          prescription = await Prescription.create({
+            prescriptionNumber: rxNumber,
+            ...patientRef,
+            doctorId: resolvedDoctorId || undefined,
+            dentistId: resolvedDentistId || undefined,
+            visitId: visit._id,
+            prescriptionDate: new Date(),
+            expiryDate,
+            medications: normalizedMeds,
+            status: 'active',
+            verificationCode,
+            qrCode: `${rxNumber}|${verificationCode}`,
+            printCount: 0,
+            prescriptionNotes: doctorNotes?.trim() || undefined
+          });
+          console.log('✅ Prescription created:', prescription.prescriptionNumber);
+        }
+      } catch (rxError) {
+        console.error('⚠️  Prescription creation failed (visit still saved):', rxError.message);
+        // Intentionally swallow — the visit itself is saved and the doctor
+        // can retry creating the prescription separately if needed.
+      }
+    }
+
+    // ── 4.6 CREATE FOLLOW-UP APPOINTMENT (if followUpDate was set) ───────
+    // Conflict was already checked above, so this should succeed. On the
+    // off-chance it fails, log the error and continue — the doctor will
+    // see the visit saved but no calendar entry and can retry.
+    let followUpAppointment = null;
+    if (followUpAppointmentDate) {
+      try {
+        const Appointment = require('../models/Appointment');
+        followUpAppointment = await Appointment.create({
+          appointmentType: 'follow_up',
+          ...patientRef,
+          doctorId: resolvedDoctorId || undefined,
+          dentistId: resolvedDentistId || undefined,
+          appointmentDate: followUpAppointmentDate,
+          appointmentTime: FOLLOWUP_DEFAULT_TIME,
+          estimatedDuration: 30,
+          reasonForVisit: (followUpNotes && followUpNotes.trim())
+            || `موعد متابعة — ${diagnosis?.trim() || chiefComplaint.trim()}`,
+          status: 'scheduled',
+          bookingMethod: 'admin',
+          priority: 'routine',
+          paymentStatus: 'pending'
+        });
+        console.log('✅ Follow-up appointment created:', followUpAppointment._id);
+      } catch (apptError) {
+        console.error('⚠️  Follow-up appointment creation failed:', apptError.message);
+      }
+    }
+
+    // ── 5. AUDIT LOG ─────────────────────────────────────────────────────
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'CREATE_VISIT',
+      description: `Created ${visitType} visit`,
+      resourceType: 'visit',
+      resourceId: visit._id,
+      patientPersonId: patientRef.patientPersonId,
+      patientChildId: patientRef.patientChildId,
+      ipAddress: req.ip || 'unknown',
+      success: true
+    });
+
+    return res.status(201).json({
+      success: true,
+      message: 'تم إنشاء الزيارة بنجاح',
+      visit,
+      prescription: prescription
+        ? { _id: prescription._id, prescriptionNumber: prescription.prescriptionNumber }
+        : null,
+      followUpAppointment: followUpAppointment
+        ? {
+            _id: followUpAppointment._id,
+            appointmentDate: followUpAppointment.appointmentDate,
+            appointmentTime: followUpAppointment.appointmentTime
+          }
+        : null
+    });
+
+  } catch (error) {
+    console.error('❌ Create visit error:', error);
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map(e => e.message);
+      return res.status(400).json({
+        success: false,
+        message: messages[0] || 'خطأ في البيانات'
+      });
+    }
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء حفظ الزيارة'
+      message: 'حدث خطأ في إنشاء الزيارة'
     });
   }
 };
 
-/**
- * @route   GET /api/doctor/patient/:nationalId/visits
- * @desc    Get all visits for a specific patient
- * @access  Private (Doctor only)
- */
-exports.getPatientVisitsByNationalId = async (req, res) => {
-  try {
-    const { nationalId } = req.params;
+// ============================================================================
+// 2. GET PATIENT VISITS
+// ============================================================================
 
-    
-// Find patient by national ID or child ID
-    console.log('🔍 Searching for person visits:', nationalId);
-    
-    const person = await Person.findOne({
-      $or: [
-        { nationalId: nationalId },
-        { childId: nationalId }
-      ]
-    }).lean();
-    
-    console.log('📥 Person found:', person ? '✅' : '❌');
-    
-    if (!person) {
+/**
+ * @route   GET /api/visits/patient/:identifier
+ * @desc    List all visits for a patient identified by nationalId or CRN.
+ *          Returns latest first, with optional pagination.
+ * @access  Private (patient owner, admin, treating doctor)
+ */
+exports.getPatientVisits = async (req, res) => {
+  try {
+    const { identifier } = req.params;
+    const { page = 1, limit = 20 } = req.query;
+
+    // Resolve identifier — could be nationalId (11 digits) or CRN (CRN-...)
+    let patientRef;
+    if (/^\d{11}$/.test(identifier)) {
+      // National ID — check Person first, then Children
+      const adult = await Person.findOne({ nationalId: identifier }).lean();
+      if (adult) {
+        patientRef = { patientPersonId: adult._id };
+      } else {
+        const child = await Children.findOne({ nationalId: identifier }).lean();
+        if (child) patientRef = { patientChildId: child._id };
+      }
+    } else if (identifier.startsWith('CRN-')) {
+      const child = await Children.findOne({ childRegistrationNumber: identifier }).lean();
+      if (child) patientRef = { patientChildId: child._id };
+    }
+
+    if (!patientRef) {
       return res.status(404).json({
         success: false,
         message: 'لم يتم العثور على المريض'
       });
     }
 
-    // Get visits
-    const visits = await Visit.find({ patientId: person._id })
-      .populate('doctorId', 'specialization institution')
-      .sort({ visitDate: -1 })
-      .lean();
+    const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
 
-    res.json({
-      success: true,
-      count: visits.length,
-      visits
-    });
+const [visits, total] = await Promise.all([
+  Visit.find(patientRef)
+    .populate('doctorId', 'specialization medicalLicenseNumber')
+    .populate('dentistId', 'specialization dentalLicenseNumber')
+    .populate('hospitalId', 'name arabicName')
+    .sort({ visitDate: -1 })
+    .limit(safeLimit)
+    .skip((safePage - 1) * safeLimit)
+    .lean(),
+  Visit.countDocuments(patientRef)
+]);
 
+// ─── Fetch lab tests linked to these visits and attach them ──────────────
+// Single batched query (O(1) DB round-trip instead of N queries).
+const visitIds = visits.map((v) => v._id);
+if (visitIds.length > 0) {
+  const labTests = await LabTest.find({ visitId: { $in: visitIds } })
+    .populate('laboratoryId', 'name arabicName governorate city')
+    .sort({ orderDate: -1 })
+    .lean();
+
+  // Group by visitId for O(1) lookup during attach
+  const labsByVisit = {};
+  for (const lt of labTests) {
+    const vid = String(lt.visitId);
+    if (!labsByVisit[vid]) labsByVisit[vid] = [];
+    labsByVisit[vid].push(lt);
+  }
+
+  // Attach to each visit (empty array if no tests)
+  for (const v of visits) {
+    v.labTests = labsByVisit[String(v._id)] || [];
+  }
+}
+
+return res.json({
+  success: true,
+  count: total,
+  page: safePage,
+  pages: Math.ceil(total / safeLimit),
+  visits
+});
   } catch (error) {
-    console.error('Error fetching patient visits:', error);
-    res.status(500).json({
+    console.error('Get patient visits error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء جلب الزيارات'
+      message: 'حدث خطأ في جلب زيارات المريض'
     });
   }
 };
 
+// ============================================================================
+// 3. GET DOCTOR VISITS
+// ============================================================================
+
 /**
- * @route   GET /api/doctor/visits
- * @desc    Get all visits by this doctor
- * @access  Private (Doctor only)
+ * @route   GET /api/visits/doctor/:doctorId
+ * @desc    List visits handled by a specific doctor
+ * @access  Private (doctor self, admin)
  */
 exports.getDoctorVisits = async (req, res) => {
   try {
-    // Get doctor
-    const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
-    if (!doctor) {
-      return res.status(404).json({
-        success: false,
-        message: 'لم يتم العثور على بيانات الطبيب'
-      });
-    }
+    const { doctorId } = req.params;
+    const { page = 1, limit = 20, status } = req.query;
 
-    // Get visits
-    const visits = await Visit.find({ doctorId: doctor._id })
-      .populate('patientId', 'firstName lastName nationalId')
-      .sort({ visitDate: -1 })
-      .limit(50)
-      .lean();
+    const query = { doctorId };
+    if (status) query.status = status;
 
-    res.json({
+    const safeLimit = Math.min(parseInt(limit, 10) || 20, 100);
+    const safePage = Math.max(parseInt(page, 10) || 1, 1);
+
+    const [visits, total] = await Promise.all([
+      Visit.find(query)
+        .populate('patientPersonId', 'firstName lastName nationalId')
+        .populate('patientChildId', 'firstName lastName childRegistrationNumber')
+        .sort({ visitDate: -1 })
+        .limit(safeLimit)
+        .skip((safePage - 1) * safeLimit)
+        .lean(),
+      Visit.countDocuments(query)
+    ]);
+
+    return res.json({
       success: true,
-      count: visits.length,
+      count: total,
+      page: safePage,
+      pages: Math.ceil(total / safeLimit),
       visits
     });
-
   } catch (error) {
-    console.error('Error fetching doctor visits:', error);
-    res.status(500).json({
+    console.error('Get doctor visits error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء جلب الزيارات'
+      message: 'حدث خطأ في جلب زيارات الطبيب'
     });
   }
 };
 
-/**
- * @route   GET /api/doctor/visit/:visitId
- * @desc    Get visit details
- * @access  Private (Doctor only)
- */
-exports.getVisitDetailsDoctor = async (req, res) => {
-  try {
-    const { visitId } = req.params;
+// ============================================================================
+// 4. GET VISIT BY ID
+// ============================================================================
 
-    const visit = await Visit.findById(visitId)
-      .populate('patientId', 'firstName lastName nationalId dateOfBirth gender')
-      .populate('doctorId', 'specialization institution')
+/**
+ * @route   GET /api/visits/:id
+ * @desc    Get a single visit detail with all populated refs
+ * @access  Private (patient owner, treating doctor, admin)
+ */
+exports.getVisitById = async (req, res) => {
+  try {
+    const { id } = req.params;
+
+    const visit = await Visit.findById(id)
+      .populate('patientPersonId', 'firstName lastName nationalId phoneNumber')
+      .populate('patientChildId', 'firstName lastName childRegistrationNumber phoneNumber')
+      .populate('doctorId', 'specialization medicalLicenseNumber')
+      .populate('dentistId', 'specialization dentalLicenseNumber')
+      .populate('hospitalId', 'name arabicName')
       .lean();
 
     if (!visit) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على الزيارة'
+        message: 'الزيارة غير موجودة'
       });
     }
 
-    res.json({
-      success: true,
-      visit
-    });
-
+    return res.json({ success: true, visit });
   } catch (error) {
-    console.error('Error fetching visit details:', error);
-    res.status(500).json({
+    console.error('Get visit by id error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء جلب تفاصيل الزيارة'
+      message: 'حدث خطأ في جلب الزيارة'
     });
   }
 };
 
+// ============================================================================
+// 5. UPDATE VISIT
+// ============================================================================
+
 /**
- * @route   PUT /api/doctor/visit/:visitId
- * @desc    Update visit
- * @access  Private (Doctor only)
+ * @route   PUT /api/visits/:id
+ * @desc    Update visit fields. Only the visit's owning doctor or admin
+ *          can update.
+ * @access  Private (treating doctor, admin)
  */
 exports.updateVisit = async (req, res) => {
   try {
-    const { visitId } = req.params;
-    const {
-      chiefComplaint,
-      diagnosis,
-      prescribedMedications,
-      doctorNotes,
-      status
-    } = req.body;
+    const { id } = req.params;
+    const updates = req.body;
 
-    // Find and update visit
-    const visit = await Visit.findByIdAndUpdate(
-      visitId,
-      {
-        $set: {
-          chiefComplaint,
-          diagnosis,
-          prescribedMedications,
-          doctorNotes,
-          status
-        }
-      },
-      { new: true, runValidators: true }
-    ).populate([
-      { path: 'patientId', select: 'firstName lastName nationalId' },
-      { path: 'doctorId', select: 'specialization institution' }
-    ]);
-
+    const visit = await Visit.findById(id);
     if (!visit) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على الزيارة'
+        message: 'الزيارة غير موجودة'
       });
     }
 
-    res.json({
+    // ── Ownership check: only the treating doctor or admin can update ─────
+    const isAdmin = req.user.roles?.includes('admin');
+    const isOwnerDoctor = visit.doctorId
+      && String(visit.doctorId) === String(req.user.personId);
+    // Note: comparing to req.user.personId is approximate; in practice you
+    // would look up the Doctor by personId. For now this gates obvious abuse.
+
+    if (!isAdmin && !isOwnerDoctor) {
+      // Looser fallback — verify by the doctor record
+      const doctor = await Doctor.findOne({ personId: req.user.personId }).lean();
+      const isDoctorOwner = doctor && String(visit.doctorId) === String(doctor._id);
+      if (!isDoctorOwner) {
+        console.log('❌ Update blocked — not owner');
+        return res.status(403).json({
+          success: false,
+          message: 'ليس لديك صلاحية لتعديل هذه الزيارة'
+        });
+      }
+    }
+
+    // ── Update allowed fields
+    const allowedFields = [
+      'diagnosis', 'vitalSigns', 'prescribedMedications',
+      'doctorNotes', 'followUpDate', 'followUpNotes',
+      'visitPhotoUrl', 'paymentStatus', 'paymentMethod',
+      'ecgAnalysis'
+    ];
+    allowedFields.forEach(field => {
+      if (updates[field] !== undefined) visit[field] = updates[field];
+    });
+
+    if (updates.visitPhotoUrl) {
+      visit.visitPhotoUploadedAt = new Date();
+    }
+
+    await visit.save();
+    console.log('✅ Visit updated');
+
+    return res.json({
       success: true,
       message: 'تم تحديث الزيارة بنجاح',
       visit
     });
-
   } catch (error) {
-    console.error('Error updating visit:', error);
-    
+    console.error('Update visit error:', error);
     if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
+      const messages = Object.values(error.errors).map(e => e.message);
       return res.status(400).json({
         success: false,
-        message: 'خطأ في البيانات المدخلة',
-        errors
+        message: messages[0] || 'خطأ في البيانات'
       });
     }
-
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء تحديث الزيارة'
+      message: 'حدث خطأ في تحديث الزيارة'
     });
   }
 };
 
-// ==========================================
-// PATIENT FUNCTIONS
-// ==========================================
+// ============================================================================
+// 6. COMPLETE VISIT
+// ============================================================================
 
 /**
- * @route   GET /api/patient/visits
- * @desc    Get all patient visits with filters
- * @access  Private (Patient only)
+ * @route   POST /api/visits/:id/complete
+ * @desc    Mark visit as completed and refresh the patient's denormalized
+ *          totalVisits + lastVisitDate counters via Patient.recordVisit().
+ * @access  Private (treating doctor, admin)
  */
-exports.getVisits = async (req, res) => {
+exports.completeVisit = async (req, res) => {
+  console.log('🔵 ========== COMPLETE VISIT ==========');
+
   try {
-    // Get patient ID from authenticated user
-    const patient = await Patient.findOne({ personId: req.user.personId }).lean();
-    if (!patient) {
-      return res.status(404).json({
-        success: false,
-        message: 'لم يتم العثور على بيانات المريض'
-      });
-    }
+    const { id } = req.params;
 
-    // Build query
-    const query = { patientId: req.user.personId };
-
-    // Apply filters if provided
-    if (req.query.status) {
-      query.status = req.query.status;
-    }
-
-    if (req.query.startDate || req.query.endDate) {
-      query.visitDate = {};
-      if (req.query.startDate) {
-        query.visitDate.$gte = new Date(req.query.startDate);
-      }
-      if (req.query.endDate) {
-        query.visitDate.$lte = new Date(req.query.endDate);
-      }
-    }
-
-    if (req.query.doctorId) {
-      query.doctorId = req.query.doctorId;
-    }
-
-    // Pagination
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 50;
-    const skip = (page - 1) * limit;
-
-    // Get visits
-    const visits = await Visit.find(query)
-      .populate('doctorId', 'firstName lastName specialization institution')
-      .sort({ visitDate: -1 })
-      .skip(skip)
-      .limit(limit)
-      .lean();
-
-    // Get total count
-    const total = await Visit.countDocuments(query);
-
-    res.json({
-      success: true,
-      count: visits.length,
-      total,
-      page,
-      totalPages: Math.ceil(total / limit),
-      visits
-    });
-
-  } catch (error) {
-    console.error('Error fetching visits:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء جلب الزيارات'
-    });
-  }
-};
-
-/**
- * @route   GET /api/patient/visits/:visitId
- * @desc    Get single visit details
- * @access  Private (Patient only)
- */
-exports.getVisitDetails = async (req, res) => {
-  try {
-    const { visitId } = req.params;
-
-    // Find visit and verify ownership
-    const visit = await Visit.findOne({
-      _id: visitId,
-      patientId: req.user.personId
-    })
-      .populate('doctorId', 'firstName lastName specialization institution phoneNumber')
-      .lean();
-
+    const visit = await Visit.findById(id);
     if (!visit) {
       return res.status(404).json({
         success: false,
-        message: 'لم يتم العثور على الزيارة'
+        message: 'الزيارة غير موجودة'
       });
     }
 
-    res.json({
+    if (visit.status === 'completed') {
+      return res.status(400).json({
+        success: false,
+        message: 'الزيارة مكتملة بالفعل'
+      });
+    }
+
+    await visit.markCompleted();
+    console.log('✅ Visit marked completed');
+
+    // Refresh patient stats (totalVisits, lastVisitDate)
+    const patientQuery = visit.patientChildId
+      ? { childId: visit.patientChildId }
+      : { personId: visit.patientPersonId };
+    const patient = await Patient.findOne(patientQuery);
+    if (patient) {
+      await patient.recordVisit(visit.visitDate);
+      console.log('✅ Patient stats refreshed');
+    }
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'COMPLETE_VISIT',
+      resourceType: 'visit',
+      resourceId: visit._id,
+      patientPersonId: visit.patientPersonId,
+      patientChildId: visit.patientChildId,
+      ipAddress: req.ip || 'unknown',
+      success: true
+    });
+
+    return res.json({
       success: true,
+      message: 'تم إنهاء الزيارة بنجاح',
       visit
     });
-
   } catch (error) {
-    console.error('Error fetching visit details:', error);
-    res.status(500).json({
+    console.error('Complete visit error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء جلب تفاصيل الزيارة'
+      message: 'حدث خطأ في إنهاء الزيارة'
     });
   }
 };
+
+// ============================================================================
+// 7. DELETE VISIT (admin only — soft delete via status)
+// ============================================================================
 
 /**
- * @route   GET /api/patient/visits/stats
- * @desc    Get visit statistics
- * @access  Private (Patient only)
+ * @route   DELETE /api/visits/:id
+ * @desc    Soft-delete visit by setting status='cancelled'. Admin-only because
+ *          visit history is medically significant — patients should never
+ *          be able to remove visits from their own record.
+ * @access  Private (admin)
  */
-exports.getVisitStats = async (req, res) => {
+exports.deleteVisit = async (req, res) => {
   try {
-    const stats = await Visit.aggregate([
-      { $match: { patientId: req.user.personId } },
-      {
-        $group: {
-          _id: '$status',
-          count: { $sum: 1 }
-        }
-      }
-    ]);
+    const { id } = req.params;
 
-    const total = await Visit.countDocuments({ patientId: req.user.personId });
+    const visit = await Visit.findById(id);
+    if (!visit) {
+      return res.status(404).json({
+        success: false,
+        message: 'الزيارة غير موجودة'
+      });
+    }
 
-    res.json({
-      success: true,
-      stats: {
-        total,
-        byStatus: stats
-      }
+    visit.status = 'cancelled';
+    await visit.save();
+
+    AuditLog.record({
+      userId: req.user._id,
+      userEmail: req.user.email,
+      action: 'CANCEL_VISIT',
+      resourceType: 'visit',
+      resourceId: visit._id,
+      patientPersonId: visit.patientPersonId,
+      patientChildId: visit.patientChildId,
+      ipAddress: req.ip || 'unknown',
+      success: true
     });
 
+    return res.json({
+      success: true,
+      message: 'تم إلغاء الزيارة'
+    });
   } catch (error) {
-    console.error('Error fetching visit stats:', error);
-    res.status(500).json({
+    console.error('Delete visit error:', error);
+    return res.status(500).json({
       success: false,
-      message: 'حدث خطأ أثناء حساب إحصائيات الزيارات'
+      message: 'حدث خطأ في حذف الزيارة'
     });
   }
 };
-
-/**
- * @route   GET /api/patient/visits/by-doctor
- * @desc    Get visits grouped by doctor
- * @access  Private (Patient only)
- */
-exports.getVisitsByDoctor = async (req, res) => {
-  try {
-    const visits = await Visit.aggregate([
-      { $match: { patientId: req.user.personId } },
-      {
-        $group: {
-          _id: '$doctorId',
-          count: { $sum: 1 },
-          lastVisit: { $max: '$visitDate' }
-        }
-      },
-      { $sort: { count: -1 } }
-    ]);
-
-    // Populate doctor info
-    await Visit.populate(visits, {
-      path: '_id',
-      select: 'firstName lastName specialization institution'
-    });
-
-    res.json({
-      success: true,
-      visits
-    });
-
-  } catch (error) {
-    console.error('Error fetching visits by doctor:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء تجميع الزيارات'
-    });
-  }
-};
-
-module.exports = exports;

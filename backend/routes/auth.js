@@ -1,5 +1,5 @@
 // backend/routes/auth.js
-// Authentication routes with file upload support - NO RATE LIMITER
+// Authentication routes with file upload support
 
 const express = require('express');
 const router = express.Router();
@@ -11,7 +11,12 @@ const authController = require('../controllers/authController');
 const auth = require('../middleware/auth');
 
 // Import file upload middleware
-const { uploadFields, handleUploadErrors } = require('../middleware/uploadDoctorFiles');
+const {
+  uploadFields,
+  uploadPharmacistFields,
+  uploadLabTechFields,
+  handleUploadErrors
+} = require('../middleware/uploadDoctorFiles');
 
 // ==================== PUBLIC ROUTES ====================
 
@@ -20,53 +25,44 @@ router.post('/register', authController.signup);
 router.post('/signup', authController.signup);
 
 // Doctor Registration Request (WITH FILE UPLOADS)
-router.post('/register-doctor', 
+router.post('/register-doctor',
   uploadFields,
   handleUploadErrors,
   authController.registerDoctorRequest
 );
 
-// ✅ NEW: Check Doctor Request Status
-/**
- * @route   POST /api/auth/check-doctor-status
- * @desc    Check doctor registration request status and get credentials if approved
- * @access  Public
- * @body    { email: String }
- */
+// Pharmacist Registration Request (WITH FILE UPLOADS)
+router.post('/register-pharmacist',
+  uploadPharmacistFields,
+  handleUploadErrors,
+  authController.registerPharmacistRequest
+);
+
+// Lab Technician Registration Request (WITH FILE UPLOADS)
+router.post('/register-lab-technician',
+  uploadLabTechFields,
+  handleUploadErrors,
+  authController.registerLabTechnicianRequest
+);
+
+// Check Doctor Request Status (legacy — kept for backward compatibility)
 router.post('/check-doctor-status', authController.checkDoctorRequestStatus);
+
+// Check Professional Status (unified — works for doctor, pharmacist, lab tech)
+router.post('/check-professional-status', authController.checkProfessionalStatus);
 
 // Login
 router.post('/login', authController.login);
 
 // ==================== FORGET PASSWORD ROUTES ====================
 
-/**
- * @route   POST /api/auth/forgot-password
- * @desc    Send OTP to email
- * @access  Public
- */
 router.post('/forgot-password', authController.forgotPassword);
-
-/**
- * @route   POST /api/auth/verify-otp
- * @desc    Verify OTP code
- * @access  Public
- */
 router.post('/verify-otp', authController.verifyOTP);
-
-/**
- * @route   POST /api/auth/reset-password
- * @desc    Reset password with OTP
- * @access  Public
- */
 router.post('/reset-password', authController.resetPassword);
 
 // ==================== PROTECTED ROUTES ====================
 
-// Verify token
 router.get('/verify', auth.protect, authController.verifyToken);
-
-// Update last login
 router.post('/update-last-login', auth.protect, authController.updateLastLogin);
 
 module.exports = router;

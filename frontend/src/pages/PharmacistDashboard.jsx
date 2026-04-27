@@ -466,6 +466,16 @@ const PharmacistDashboard = () => {
     [otcCart]
   );
 
+  // Live grand total for the prescription-dispense flow.
+  // Mirrors the totalCost computation in performDispensePrescription so the
+  // number the pharmacist sees on screen is exactly what gets submitted.
+  const dispenseTotal = useMemo(
+    () => dispenseMeds
+      .filter(m => m.selected && !m.isDispensed)
+      .reduce((sum, m) => sum + ((m.quantityToDispense || 0) * (m.unitPrice || 0)), 0),
+    [dispenseMeds]
+  );
+
   const filteredHistory = useMemo(() => {
     let list = dispensingHistory;
     if (historyFilter !== 'all') {
@@ -565,6 +575,7 @@ const PharmacistDashboard = () => {
       ...med,
       selected: !med.isDispensed,        // available → default to checked
       quantityToDispense: med.quantity || 1,
+      unitPrice: 0,                      // pharmacist fills this in per medication
       isGenericSubstitute: false,
       pharmacistNotes: ''
     }));
@@ -624,6 +635,18 @@ const PharmacistDashboard = () => {
     setDispenseMeds(prev => {
       const next = [...prev];
       next[index] = { ...next[index], quantityToDispense: qty };
+      return next;
+    });
+  }, []);
+
+  /** Change unit price on a medication (in SYP) */
+  const handleChangeUnitPrice = useCallback((index, value) => {
+    // Allow the field to be cleared without snapping to 0 mid-edit.
+    // parseFloat handles both "2500" and "2500.50"; NaN falls back to 0.
+    const price = value === '' ? 0 : Math.max(0, parseFloat(value) || 0);
+    setDispenseMeds(prev => {
+      const next = [...prev];
+      next[index] = { ...next[index], unitPrice: price };
       return next;
     });
   }, []);
@@ -817,6 +840,11 @@ const PharmacistDashboard = () => {
   }, []);
 
   const handleOtcDispense = useCallback(() => {
+    // National ID is the new required first step — block if not yet linked.
+    if (!otcPatient) {
+      openAlert('warning', 'مريض مطلوب', 'الرجاء إدخال الرقم الوطني للمريض والبحث عنه قبل إتمام البيع');
+      return;
+    }
     if (otcCart.length === 0) {
       openAlert('warning', 'السلة فارغة', 'الرجاء إضافة دواء واحد على الأقل');
       return;
@@ -826,9 +854,8 @@ const PharmacistDashboard = () => {
       return;
     }
 
-    // Optional allergy gate — only runs if the pharmacist linked the sale
-    // to a known patient. Walk-ins (no patient) skip the check.
-    if (otcPatient && otcPatient.allergies?.length > 0) {
+    // Allergy gate now always runs because every OTC sale is tied to a patient.
+    if (otcPatient.allergies?.length > 0) {
       const cartAsMeds = otcCart.map(item => ({
         medicationName: item.medicationName,
         arabicName: item.arabicName
@@ -1620,6 +1647,19 @@ const PharmacistDashboard = () => {
                                     onChange={(e) => handleChangeQty(index, e.target.value)}
                                   />
                                 </div>
+                                <div className="ph-qty-group">
+                                  <label>سعر الوحدة (ل.س):</label>
+                                  <input
+                                    type="number"
+                                    min="0"
+                                    step="1"
+                                    className="ph-qty-input"
+                                    style={{ width: 110 }}
+                                    value={med.unitPrice || ''}
+                                    placeholder="0"
+                                    onChange={(e) => handleChangeUnitPrice(index, e.target.value)}
+                                  />
+                                </div>
                                 <label className="ph-med-extra-label">
                                   <input
                                     type="checkbox"
@@ -1628,6 +1668,13 @@ const PharmacistDashboard = () => {
                                   />
                                   بديل جنيس (Generic)
                                 </label>
+                                <span className="ph-otc-cart-item-price">
+                                  {formatNumber(med.quantityToDispense || 0)} ×{' '}
+                                  {formatNumber(med.unitPrice || 0)} ={' '}
+                                  <strong>
+                                    {formatNumber((med.quantityToDispense || 0) * (med.unitPrice || 0))} ل.س
+                                  </strong>
+                                </span>
                               </div>
                             )}
                           </div>
@@ -1673,6 +1720,15 @@ const PharmacistDashboard = () => {
                   </div>
 
                   <div ref={dispenseFooterRef}>
+                    <div className="ph-otc-total-row" style={{ marginBottom: 12 }}>
+                      <span className="ph-otc-total-label">
+                        <DollarSign />
+                        الإجمالي
+                      </span>
+                      <span className="ph-otc-total-amount">
+                        {formatNumber(dispenseTotal)} ل.س
+                      </span>
+                    </div>
                     <button
                       type="button"
                       className="ph-btn success full-width"
@@ -1694,16 +1750,16 @@ const PharmacistDashboard = () => {
               <div className="ph-otc-hint">
                 <Info />
                 <div>
-                  <strong>بيع بدون وصفة طبية:</strong> يمكنك صرف الأدوية التي لا تتطلب وصفة طبية.
-                  يُسجَّل سبب الصرف وجميع التفاصيل ضمن سجلات الصيدلية. إذا كان المريض معروفاً، يمكنك إدخال رقمه الوطني لربط العملية بسجله الصحي.
+                  <strong>بيع بدون وصفة طبية:</strong> ابدأ بإدخال الرقم الوطني للمريض لربط عملية البيع بسجله الصحي،
+                  ثم اختر الأدوية المطلوبة وحدد الكمية والسعر. سيتم تسجيل سبب الصرف وجميع التفاصيل ضمن سجلات الصيدلية.
                 </div>
               </div>
 
-              {/* Optional patient lookup */}
+              {/* Step 1 — Required patient lookup */}
               <div className="ph-card">
                 <div className="ph-card-header">
                   <UserPlus className="ph-card-header-icon" />
-                  <h2>ربط بمريض (اختياري)</h2>
+                  <h2>الرقم الوطني للمريض <span style={{ color: 'var(--tm-error)' }}>*</span></h2>
                 </div>
                 <div className="ph-otc-patient-row">
                   <div className="ph-form-group" style={{ flex: 1 }}>
@@ -1758,7 +1814,26 @@ const PharmacistDashboard = () => {
                 )}
               </div>
 
+              {/* Step 2 — Medication picker: hidden until patient is linked */}
+              {!otcPatient && (
+                <div className="ph-card" style={{ opacity: 0.6, pointerEvents: 'none' }}>
+                  <div className="ph-card-header">
+                    <Pill className="ph-card-header-icon" />
+                    <h2>اختر الأدوية</h2>
+                  </div>
+                  <div className="ph-empty-state" style={{ padding: '48px 24px' }}>
+                    <UserPlus style={{ width: 48, height: 48, color: 'var(--tm-text-muted)' }} />
+                    <h3 style={{ marginTop: 12 }}>أدخل الرقم الوطني للمريض أولاً</h3>
+                    <p style={{ color: 'var(--tm-text-muted)' }}>
+                      لا يمكن المتابعة بعملية البيع قبل ربطها بسجل المريض
+                    </p>
+                  </div>
+                </div>
+              )}
+
               {/* Quick OTC picks + manual entry */}
+              {otcPatient && (
+              <>
               <div className="ph-card">
                 <div className="ph-card-header">
                   <Pill className="ph-card-header-icon" />
@@ -1989,6 +2064,8 @@ const PharmacistDashboard = () => {
                     إتمام عملية البيع
                   </button>
                 </div>
+              )}
+              </>
               )}
             </>
           )}

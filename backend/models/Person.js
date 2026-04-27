@@ -1,188 +1,240 @@
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Person Model — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Collection: persons
+ *  Source of truth: patient360_db_final.js (collection 01)
+ *
+ *  Adult demographics. Used by all adult roles: doctor, patient, pharmacist,
+ *  lab_technician, dentist, admin. Children under 14 live in the separate
+ *  `children` collection and migrate here when they receive a national ID.
+ *
+ *  Identity invariants:
+ *    • nationalId — 11 digits, REQUIRED, unique
+ *    • Full Syrian naming convention: firstName, fatherName, lastName, motherName
+ *    • All four name parts are mandatory for identity verification
+ *
+ *  Soft delete:
+ *    • isDeleted=true marks the record as removed without losing data
+ *    • Queries should default to { isDeleted: { $ne: true } }
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
+
 const mongoose = require('mongoose');
 
-const personSchema = new mongoose.Schema({
-  // National ID - NULL for minors, required for adults
-  nationalId: {
-    type: String,
-    required: false,
-    unique: true,
-    sparse: true, // Allows multiple null values
-    match: [/^[0-9]{11}$/, 'الرقم الوطني يجب أن يكون 11 رقماً بالضبط']
+const { Schema } = mongoose;
+
+// ── Reusable enums (kept in sync with the locked schema) ────────────────────
+
+const GOVERNORATES = [
+  'damascus', 'aleppo', 'homs', 'hama', 'latakia', 'tartus',
+  'idlib', 'deir_ez_zor', 'raqqa', 'hasakah', 'daraa',
+  'as_suwayda', 'quneitra', 'rif_dimashq',
+];
+
+const EDUCATION_LEVELS = [
+  'none', 'primary', 'secondary', 'diploma',
+  'bachelor', 'master', 'doctorate',
+];
+
+const MARITAL_STATUSES = ['single', 'married', 'divorced', 'widowed'];
+
+const GENDERS = ['male', 'female'];
+
+// ── Sub-schema: profile photo ────────────────────────────────────────────────
+
+const ProfilePhotoSchema = new Schema(
+  {
+    url: { type: String, trim: true },
+    uploadedAt: { type: Date },
   },
-  
-  // Parent National ID - Required for minors only
-  parentNationalId: {
-    type: String,
-    required: false,
-    match: [/^[0-9]{11}$/, 'رقم الهوية الوطنية للوالد/الوالدة يجب أن يكون 11 رقماً']
-  },
-  
-  // Child ID - Auto-generated for minors (format: PARENT_ID-001, PARENT_ID-002, etc.)
-  childId: {
-    type: String,
-    required: false,
-    unique: true,
-    sparse: true,
-    // ✅ NEW: Format validation for childId
-    validate: {
-      validator: function(v) {
-        if (!v) return true; // Allow null/empty
-        return /^[0-9]{11}-[0-9]{3}$/.test(v);
+  { _id: false },
+);
+
+// ── Main schema ──────────────────────────────────────────────────────────────
+
+const PersonSchema = new Schema(
+  {
+    // ── Identity (all required) ───────────────────────────────────────────
+    nationalId: {
+      type: String,
+      required: [true, 'الرقم الوطني مطلوب'],
+      unique: true,
+      match: [/^\d{11}$/, 'الرقم الوطني يجب أن يكون 11 رقم بالضبط'],
+      trim: true,
+      index: true,
+    },
+    firstName: {
+      type: String,
+      required: [true, 'الاسم الأول مطلوب'],
+      trim: true,
+      minlength: [2, 'الاسم الأول يجب أن يكون حرفين على الأقل'],
+      maxlength: [50, 'الاسم الأول يجب ألا يتجاوز 50 حرف'],
+    },
+    fatherName: {
+      type: String,
+      required: [true, 'اسم الأب مطلوب'],
+      trim: true,
+      minlength: [2, 'اسم الأب يجب أن يكون حرفين على الأقل'],
+      maxlength: [50, 'اسم الأب يجب ألا يتجاوز 50 حرف'],
+    },
+    lastName: {
+      type: String,
+      required: [true, 'اسم العائلة مطلوب'],
+      trim: true,
+      minlength: [2, 'اسم العائلة يجب أن يكون حرفين على الأقل'],
+      maxlength: [50, 'اسم العائلة يجب ألا يتجاوز 50 حرف'],
+    },
+    motherName: {
+      type: String,
+      required: [true, 'اسم الأم مطلوب'],
+      trim: true,
+      minlength: [2, 'اسم الأم يجب أن يكون حرفين على الأقل'],
+      maxlength: [100, 'اسم الأم يجب ألا يتجاوز 100 حرف'],
+    },
+
+    // ── Personal details ──────────────────────────────────────────────────
+    dateOfBirth: {
+      type: Date,
+      required: [true, 'تاريخ الميلاد مطلوب'],
+      validate: {
+        validator: (v) => v < new Date(),
+        message: 'تاريخ الميلاد يجب أن يكون في الماضي',
       },
-      message: 'معرف الطفل يجب أن يكون بالصيغة: XXXXXXXXXXX-XXX'
-    }
-  },
-  
-  // Is Minor flag (age < 18)
-  isMinor: {
-    type: Boolean,
-    default: false
-  },
-  
-  firstName: {
-    type: String,
-    required: [true, 'الاسم الأول مطلوب'],
-    minlength: [2, 'الاسم الأول يجب أن يكون حرفين على الأقل'],
-    maxlength: [50, 'الاسم الأول يجب ألا يتجاوز 50 حرفاً'],
-    match: [/^[a-zA-Z\u0600-\u06FF\s]+$/, 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط']
-  },
-  
-  lastName: {
-    type: String,
-    required: [true, 'اسم العائلة مطلوب'],
-    minlength: [2, 'اسم العائلة يجب أن يكون حرفين على الأقل'],
-    maxlength: [50, 'اسم العائلة يجب ألا يتجاوز 50 حرفاً'],
-    match: [/^[a-zA-Z\u0600-\u06FF\s]+$/, 'الاسم يجب أن يحتوي على أحرف عربية أو إنجليزية فقط']
-  },
-  
-  // ✅ UPDATED: Date of Birth with validation
-  dateOfBirth: {
-    type: Date,
-    required: [true, 'تاريخ الميلاد مطلوب'],
-    validate: {
-      validator: function(v) {
-        if (!v) return false;
-        
-        const today = new Date();
-        const birthDate = new Date(v);
-        
-        // ✅ Cannot be in the future
-        if (birthDate > today) {
-          return false;
-        }
-        
-        // ✅ Calculate age
-        const age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
-        
-        // ✅ Age must be between 0-120 years
-        if (age < 0 || age > 120) {
-          return false;
-        }
-        
-        return true;
-      },
-      message: 'تاريخ الميلاد يجب أن يكون في الماضي والعمر بين 0-120 سنة'
-    }
-  },
-  
-  gender: {
-    type: String,
-    required: [true, 'الجنس مطلوب'],
-    enum: {
-      values: ['male', 'female'],
-      message: 'الجنس يجب أن يكون ذكر أو أنثى'
-    }
-  },
-  
-  phoneNumber: {
-    type: String,
-    required: [true, 'رقم الهاتف مطلوب'],
-    match: [/^(\+963[0-9]{9}|09[0-9]{8}|0[0-9]{9})$/, 'رقم الهاتف يجب أن يكون بالصيغة السورية']
-  },
-  
-  address: {
-    type: String,
-    required: false,
-    minlength: [5, 'العنوان يجب أن يكون 5 أحرف على الأقل'],
-    maxlength: [200, 'العنوان يجب ألا يتجاوز 200 حرف']
-  },
-  
-  // Governorate field
-  governorate: {
-    type: String,
-    required: false,
-    enum: {
-      values: [
-        'damascus', 'rif_dimashq', 'aleppo', 'homs', 'hama', 
-        'latakia', 'tartus', 'idlib', 'deir_ez_zor', 'hasakah',
-        'raqqa', 'daraa', 'suwayda', 'quneitra'
+    },
+    gender: {
+      type: String,
+      enum: { values: GENDERS, message: 'الجنس يجب أن يكون ذكر أو أنثى' },
+      required: [true, 'الجنس مطلوب'],
+    },
+    maritalStatus: { type: String, enum: MARITAL_STATUSES },
+    occupation: { type: String, trim: true, maxlength: 100 },
+    education: { type: String, enum: EDUCATION_LEVELS },
+
+    // ── Contact ───────────────────────────────────────────────────────────
+    phoneNumber: {
+      type: String,
+      required: [true, 'رقم الهاتف مطلوب'],
+      trim: true,
+    },
+    alternativePhoneNumber: { type: String, trim: true },
+    email: {
+      type: String,
+      trim: true,
+      lowercase: true,
+      match: [
+        /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+        'البريد الإلكتروني غير صحيح',
       ],
-      message: 'المحافظة غير صالحة'
-    }
+    },
+
+    // ── Address ───────────────────────────────────────────────────────────
+    governorate: {
+      type: String,
+      enum: { values: GOVERNORATES, message: 'المحافظة غير صالحة' },
+      required: [true, 'المحافظة مطلوبة'],
+      index: true,
+    },
+    city: {
+      type: String,
+      required: [true, 'المدينة مطلوبة'],
+      trim: true,
+    },
+    district: { type: String, trim: true },
+    street: { type: String, trim: true },
+    building: { type: String, trim: true },
+    address: {
+      type: String,
+      required: [true, 'العنوان مطلوب'],
+      trim: true,
+    },
+
+    // ── Profile photo ─────────────────────────────────────────────────────
+    profilePhoto: { type: ProfilePhotoSchema, default: undefined },
+
+    // ── Status & soft delete ──────────────────────────────────────────────
+    isActive: { type: Boolean, default: true },
+    isDeleted: { type: Boolean, default: false, index: true },
+    deletedAt: { type: Date },
+    deletedBy: { type: Schema.Types.ObjectId, ref: 'Account' },
+    deletionReason: { type: String, trim: true },
+    notes: { type: String, trim: true },
   },
-  
-  // City field
-  city: {
-    type: String,
-    required: false,
-    minlength: [2, 'اسم المدينة يجب أن يكون حرفين على الأقل'],
-    maxlength: [50, 'اسم المدينة يجب ألا يتجاوز 50 حرفاً']
-  }
-}, {
-  timestamps: true,
-  collection: 'persons'
+  {
+    timestamps: true, // adds createdAt + updatedAt
+    collection: 'persons',
+    toJSON: { virtuals: true },
+    toObject: { virtuals: true },
+  },
+);
+
+// ── Compound indexes (single-field indexes are declared inline above) ───────
+
+PersonSchema.index({ firstName: 1, fatherName: 1, lastName: 1 }, { name: 'idx_fullname' });
+PersonSchema.index({ governorate: 1, city: 1 }, { name: 'idx_location' });
+PersonSchema.index({ isDeleted: 1, isActive: 1 }, { name: 'idx_status' });
+PersonSchema.index(
+  { email: 1 },
+  { unique: true, sparse: true, name: 'idx_email_unique' },
+);
+
+// ── Virtuals ────────────────────────────────────────────────────────────────
+
+/**
+ * Full Syrian name in conventional order.
+ * @returns {string} e.g. "Ahmad Hassan Al-Sayed"
+ */
+PersonSchema.virtual('fullName').get(function () {
+  return [this.firstName, this.fatherName, this.lastName]
+    .filter(Boolean)
+    .join(' ');
 });
 
-// Indexes
-personSchema.index({ nationalId: 1 }, { unique: true, sparse: true });
-personSchema.index({ childId: 1 }, { unique: true, sparse: true });
-personSchema.index({ parentNationalId: 1 });
-personSchema.index({ firstName: 1, lastName: 1 });
-
-// ============================================
-// PRE-SAVE MIDDLEWARE
-// ============================================
-
-// ✅ NEW: Auto-calculate isMinor based on dateOfBirth
-personSchema.pre('save', function(next) {
-  if (this.dateOfBirth) {
-    const today = new Date();
-    const birthDate = new Date(this.dateOfBirth);
-    const age = Math.floor((today - birthDate) / (365.25 * 24 * 60 * 60 * 1000));
-    
-    // ✅ Auto-set isMinor flag
-    this.isMinor = age < 18;
-    
-    console.log(`✅ Auto-calculated: age=${age}, isMinor=${this.isMinor}`);
+/**
+ * Calculated age in completed years.
+ * @returns {number|null}
+ */
+PersonSchema.virtual('age').get(function () {
+  if (!this.dateOfBirth) return null;
+  const today = new Date();
+  const birth = new Date(this.dateOfBirth);
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1;
   }
-  
-  next();
+  return age;
 });
 
-// ============================================
-// PRE-VALIDATE MIDDLEWARE
-// ============================================
+// ── Query helpers ───────────────────────────────────────────────────────────
 
-// Custom validation: Either nationalId OR parentNationalId must be present
-personSchema.pre('validate', function(next) {
-  if (this.isMinor) {
-    // Minor: must have parentNationalId, nationalId should be null
-    if (!this.parentNationalId) {
-      this.invalidate('parentNationalId', 'رقم الهوية الوطنية للوالد/الوالدة مطلوب للقاصرين');
-    }
-    if (this.nationalId) {
-      this.invalidate('nationalId', 'القاصرون لا يمكنهم الحصول على رقم هوية وطنية');
-    }
-  } else {
-    // Adult: must have nationalId, parentNationalId should be null
-    if (!this.nationalId) {
-      this.invalidate('nationalId', 'رقم الهوية الوطنية مطلوب للبالغين');
-    }
-    if (this.parentNationalId) {
-      this.invalidate('parentNationalId', 'البالغون لا يحتاجون لرقم هوية الوالد/الوالدة');
-    }
-  }
-  next();
-});
+/**
+ * Filter out soft-deleted persons. Use with .find().notDeleted()
+ */
+PersonSchema.query.notDeleted = function notDeleted() {
+  return this.where({ isDeleted: { $ne: true } });
+};
 
-module.exports = mongoose.model('Person', personSchema, 'persons');
+/**
+ * Filter active accounts only. Use with .find().active()
+ */
+PersonSchema.query.active = function active() {
+  return this.where({ isActive: true, isDeleted: { $ne: true } });
+};
+
+// ── Instance methods ────────────────────────────────────────────────────────
+
+/**
+ * Soft-delete this person record.
+ * @param {ObjectId} accountId - the account performing the deletion
+ * @param {string} [reason]
+ */
+PersonSchema.methods.softDelete = async function softDelete(accountId, reason) {
+  this.isDeleted = true;
+  this.deletedAt = new Date();
+  this.deletedBy = accountId;
+  if (reason) this.deletionReason = reason;
+  return this.save();
+};
+
+module.exports = mongoose.model('Person', PersonSchema);

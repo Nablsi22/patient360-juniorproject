@@ -20,6 +20,7 @@
     10.  New visit form (vital signs grid with WHO indicators, meds)
     11.  AI tools — ECG (cardiologist)
     12.  AI tools — X-Ray (orthopedist)
+    12.5 LAB ORDER — قسم طلب التحاليل المختبرية (NEW)
     13.  Notifications panel (slide-in)
     14.  Modal system
     15.  Buttons
@@ -3149,6 +3150,225 @@
 }
 
 /* ════════════════════════════════════════════════════════════════════
+   12.5 LAB ORDER — قسم طلب التحاليل المختبرية (NEW)
+   ────────────────────────────────────────────────────────────────────
+   يستخدم نفس بنية .dd-form-section الموجودة لكن مع لمسة accent مميزة
+   عبر شريط جانبي بلون gradient، لتمييزه بصرياً عن باقي أقسام النموذج
+   (الأدوية، العلامات الحيوية، إلخ) دون كسر التناغم العام.
+   ──────────────────────────────────────────────────────────────────── */
+
+/* القسم الرئيسي — يرث .dd-form-section ويضيف لمسة مميزة */
+.dd-lab-order-section {
+  position: relative;
+}
+
+.dd-lab-order-section::before {
+  content: '';
+  position: absolute;
+  inset-block: 16px;
+  inset-inline-end: 0;
+  width: 3px;
+  border-radius: 0 6px 6px 0;
+  background: var(--tm-gradient);
+  opacity: 0.6;
+  pointer-events: none;
+}
+
+/* أيقونة القسم تأخذ لون gradient كامل لتدل على نوع المحتوى */
+.dd-lab-order-section .dd-form-section-icon {
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  box-shadow: 0 4px 14px var(--tm-glow);
+}
+
+/* ── حالة تحميل المختبرات ─────────────────────────────────────────── */
+.dd-lab-loading {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: rgba(var(--tm-action-rgb), 0.06);
+  border: 1px dashed rgba(var(--tm-action-rgb), 0.30);
+  border-radius: 12px;
+  color: var(--tm-action);
+  font-size: 0.875rem;
+  font-weight: 600;
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-lab-loading svg {
+  flex-shrink: 0;
+}
+
+/* ── حالة عدم توفر مختبرات ───────────────────────────────────────── */
+.dd-lab-empty {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 16px;
+  background: var(--tm-warning-light);
+  border: 1px solid rgba(245, 124, 0, 0.20);
+  border-right: 3px solid var(--tm-warning);
+  border-radius: 12px;
+  color: var(--tm-warning);
+  font-size: 0.825rem;
+  font-weight: 600;
+  font-family: 'Cairo', sans-serif;
+  width: 100%;
+}
+
+.dd-lab-empty svg {
+  flex-shrink: 0;
+}
+
+/* ── نص توضيحي صغير تحت الحقل ────────────────────────────────────── */
+.dd-field-hint {
+  margin: 8px 0 0;
+  font-size: 0.75rem;
+  color: var(--tm-text-muted);
+  line-height: 1.6;
+  font-family: 'Cairo', sans-serif;
+}
+
+/* ── زر إضافة التحليل (alias لـ .dd-meds-add-btn بسبب اختلاف اسم
+       الـ class بين الـ JSX الحالي والـ CSS) ────────────────────── */
+.dd-add-med-btn {
+  width: 100%;
+  margin-top: 16px;
+  padding: 12px 20px;
+  border-radius: 12px;
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  border: none;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.875rem;
+  font-weight: 700;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: 0 4px 14px var(--tm-glow);
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+
+.dd-add-med-btn:hover:not(:disabled) {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 22px var(--tm-glow);
+}
+
+.dd-add-med-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+.dd-add-med-btn svg {
+  flex-shrink: 0;
+}
+
+/* ── قائمة التحاليل المضافة ───────────────────────────────────────── */
+.dd-lab-tests-list {
+  margin-top: 18px;
+  padding: 16px 18px;
+  background: rgba(var(--tm-action-rgb), 0.04);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.dd-lab-tests-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding-bottom: 12px;
+  border-bottom: 1px solid var(--tm-divider);
+  font-size: 0.825rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-lab-tests-header svg {
+  color: var(--tm-action);
+  flex-shrink: 0;
+}
+
+/* ── كل تحليل مضاف (item) ─────────────────────────────────────────── */
+.dd-lab-test-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 14px;
+  background: var(--tm-card-bg);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 10px;
+  transition: all 0.25s ease;
+}
+
+.dd-lab-test-item:hover {
+  border-color: rgba(var(--tm-action-rgb), 0.30);
+  transform: translateX(-2px);
+  box-shadow: 0 4px 12px rgba(var(--tm-primary-rgb), 0.05);
+}
+
+.dd-lab-test-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dd-lab-test-name {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.9rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-lab-test-name svg {
+  color: var(--tm-action);
+  flex-shrink: 0;
+}
+
+.dd-lab-test-notes {
+  font-size: 0.75rem;
+  color: var(--tm-text-muted);
+  font-family: 'Cairo', sans-serif;
+  font-style: italic;
+  padding-inline-start: 20px;
+}
+
+/* ── زر حذف التحليل ─────────────────────────────────────────────── */
+.dd-lab-test-remove {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  background: var(--tm-error-light);
+  color: var(--tm-error);
+  border: 1px solid rgba(211, 47, 47, 0.18);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.2s ease;
+}
+
+.dd-lab-test-remove:hover {
+  background: var(--tm-error);
+  color: #FFFFFF;
+  border-color: transparent;
+  transform: scale(1.05);
+}
+
+/* ════════════════════════════════════════════════════════════════════
    13. NOTIFICATIONS PANEL (slide-in)
    ──────────────────────────────────────────────────────────────────── */
 
@@ -3749,6 +3969,10 @@
   .dd-notif-panel {
     width: 100%;
   }
+  /* Lab order — تكييف للموبايل */
+  .dd-lab-test-item {
+    gap: 8px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -3793,7 +4017,9 @@
 .dd-recent-patient-card:focus-visible,
 .dd-family-card:focus-visible,
 .dd-cal-cell:focus-visible,
-.dd-cal-slot:focus-visible {
+.dd-cal-slot:focus-visible,
+.dd-add-med-btn:focus-visible,
+.dd-lab-test-remove:focus-visible {
   outline: 3px solid var(--tm-accent);
   outline-offset: 2px;
 }
@@ -3809,5 +4035,185 @@
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.01ms !important;
+  }
+}
+
+/* ═══════════════════════════════════════════════════════════════════
+   LAB TESTS SECTION inside Visit Card (History tab)
+   Teal Medica design tokens — RTL-aware, dark-mode compatible
+   ═══════════════════════════════════════════════════════════════════ */
+
+.dd-visit-labs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  margin-top: 6px;
+}
+
+.dd-visit-lab-item {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 14px 16px;
+  background: rgba(var(--tm-action-rgb), 0.05);
+  border: 1px solid var(--tm-card-border);
+  border-radius: 12px;
+  transition: all 0.2s ease;
+}
+
+.dd-visit-lab-item:hover {
+  border-color: rgba(var(--tm-action-rgb), 0.35);
+  background: rgba(var(--tm-action-rgb), 0.08);
+  transform: translateY(-1px);
+}
+
+.dd-visit-lab-icon {
+  width: 42px;
+  height: 42px;
+  min-width: 42px;
+  border-radius: 12px;
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  box-shadow: 0 4px 12px var(--tm-glow);
+}
+
+.dd-visit-lab-info {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.dd-visit-lab-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.dd-visit-lab-number {
+  font-size: 0.88rem;
+  font-weight: 700;
+  color: var(--tm-primary);
+  font-family: 'Inter', sans-serif;
+  letter-spacing: 0.3px;
+}
+
+.dd-visit-lab-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 0.7rem;
+  font-weight: 700;
+  font-family: 'Cairo', sans-serif;
+  white-space: nowrap;
+}
+
+.dd-visit-lab-status.completed {
+  background: var(--tm-success-light);
+  color: var(--tm-success);
+}
+.dd-visit-lab-status.ordered,
+.dd-visit-lab-status.scheduled {
+  background: var(--tm-info-light);
+  color: var(--tm-info);
+}
+.dd-visit-lab-status.sample_collected,
+.dd-visit-lab-status.in_progress {
+  background: var(--tm-warning-light);
+  color: var(--tm-warning);
+}
+.dd-visit-lab-status.rejected {
+  background: var(--tm-error-light);
+  color: var(--tm-error);
+}
+.dd-visit-lab-status.cancelled {
+  background: rgba(var(--tm-primary-rgb), 0.08);
+  color: var(--tm-text-muted);
+}
+
+.dd-visit-lab-tests {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.dd-visit-lab-test-chip {
+  font-size: 0.75rem;
+  font-weight: 600;
+  padding: 3px 10px;
+  border-radius: 8px;
+  background: rgba(var(--tm-action-rgb), 0.12);
+  color: var(--tm-action);
+  font-family: 'Cairo', sans-serif;
+  border: 1px solid rgba(var(--tm-action-rgb), 0.18);
+}
+
+.dd-visit-lab-lab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.78rem;
+  color: var(--tm-text-muted);
+  font-family: 'Cairo', sans-serif;
+}
+
+.dd-visit-lab-lab svg {
+  flex-shrink: 0;
+  color: var(--tm-action);
+}
+
+.dd-visit-lab-pdf-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 18px;
+  border-radius: 10px;
+  background: var(--tm-gradient);
+  color: #FFFFFF;
+  border: none;
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.82rem;
+  font-weight: 700;
+  cursor: pointer;
+  text-decoration: none;
+  flex-shrink: 0;
+  transition: all 0.25s ease;
+  box-shadow: 0 4px 12px var(--tm-glow);
+  white-space: nowrap;
+}
+
+.dd-visit-lab-pdf-btn:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 8px 20px var(--tm-glow);
+  color: #FFFFFF;
+  text-decoration: none;
+}
+
+.dd-visit-lab-pdf-btn:active {
+  transform: translateY(0);
+}
+
+.dd-visit-lab-pdf-btn svg {
+  flex-shrink: 0;
+}
+
+/* Responsive: stack on mobile */
+@media (max-width: 640px) {
+  .dd-visit-lab-item {
+    flex-wrap: wrap;
+  }
+
+  .dd-visit-lab-pdf-btn {
+    width: 100%;
+    justify-content: center;
+    margin-top: 8px;
   }
 }

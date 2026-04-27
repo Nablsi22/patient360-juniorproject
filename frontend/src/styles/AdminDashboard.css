@@ -2538,6 +2538,102 @@
    21. REDUCED MOTION
    ──────────────────────────────────────────────────────────────────── */
 
+/* ═══════════════════════════════════════════════════════════════
+   TYPE TABS — professional request type filter
+   ═══════════════════════════════════════════════════════════════ */
+
+.ad-type-tabs {
+  display: flex;
+  gap: 0;
+  background: var(--tm-surface);
+  border-radius: 12px;
+  padding: 4px;
+  margin-bottom: 16px;
+  border: 1px solid var(--tm-border, rgba(0,0,0,0.06));
+  overflow-x: auto;
+}
+
+.ad-type-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 20px;
+  border: none;
+  background: transparent;
+  color: var(--tm-text-muted);
+  font-family: 'Cairo', sans-serif;
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-radius: 9px;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+  flex: 1;
+  justify-content: center;
+}
+
+.ad-type-tab:hover {
+  color: var(--tm-primary);
+  background: rgba(0, 137, 123, 0.06);
+}
+
+.ad-type-tab.active {
+  background: var(--tm-action);
+  color: #fff;
+  box-shadow: 0 2px 8px rgba(0, 137, 123, 0.25);
+}
+
+.ad-type-tab-count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 22px;
+  padding: 0 6px;
+  border-radius: 11px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  background: rgba(0, 0, 0, 0.08);
+  color: inherit;
+}
+
+.ad-type-tab.active .ad-type-tab-count {
+  background: rgba(255, 255, 255, 0.25);
+  color: #fff;
+}
+
+[data-theme="dark"] .ad-type-tabs {
+  background: var(--tm-surface);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .ad-type-tab:hover {
+  background: rgba(77, 182, 172, 0.1);
+}
+
+[data-theme="dark"] .ad-type-tab.active {
+  background: var(--tm-action);
+}
+
+[data-theme="dark"] .ad-type-tab-count {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@media (max-width: 640px) {
+  .ad-type-tabs {
+    border-radius: 10px;
+    padding: 3px;
+  }
+  .ad-type-tab {
+    padding: 8px 12px;
+    font-size: 0.78rem;
+    gap: 5px;
+  }
+  .ad-type-tab svg {
+    display: none;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *,
   *::before,

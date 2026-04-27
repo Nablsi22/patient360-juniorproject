@@ -40,6 +40,8 @@ import {
   Plus, Check, CheckCircle2, XCircle, AlertTriangle, AlertCircle, AlertOctagon, Info,
   Download, ExternalLink, Eye, Clock, RotateCcw, Filter, Search, Trash2,
   MapPinned, Siren,
+  // Medication card fields
+  Syringe, Repeat, Hash, Navigation,
   // Theme toggle
   Sun, Moon,
   // AI input modalities (Image aliased to avoid DOM Image clash)
@@ -157,6 +159,22 @@ const SIDEBAR_GROUPS = [
 // ══════════════════════════════════════════════════════════════════════
 
 const ARABIC_DATE_LOCALE = 'ar-SY';
+
+// ══════════════════════════════════════════════════════════════════
+// Medication display helpers (used in prescriptions section)
+// ══════════════════════════════════════════════════════════════════
+
+// DB enum (from patient360_db_final.js → prescriptions.medications.route)
+// mapped to user-facing Arabic labels.
+const MED_ROUTE_LABELS = {
+  oral:        'عن طريق الفم',
+  topical:     'موضعي',
+  injection:   'حقنة',
+  inhalation:  'استنشاق',
+  sublingual:  'تحت اللسان',
+  rectal:      'شرجي',
+  other:       'أخرى',
+};
 
 function formatDate(iso) {
   if (!iso) return '—';
@@ -451,7 +469,7 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
                       onClick={() => { setSelectedSlot(slot); setStep('confirm'); }}
                     >
                       <Calendar size={16} aria-hidden="true" />
-                      <span dir="ltr">{formatDate(slot.slotDate)}</span>
+                      <span dir="ltr">{formatDate(slot.date)}</span>
                       <span dir="ltr">{slot.startTime} — {slot.endTime}</span>
                     </button>
                   </li>
@@ -469,7 +487,7 @@ function AppointmentBookingFlow({ openAlert, onSuccess, onClose }) {
           <div className="pd-booking-confirm">
             <div className="pd-booking-summary">
               <p><strong>الطبيب:</strong> <span dir="auto">{selectedDoctor?.firstName} {selectedDoctor?.lastName}</span></p>
-              <p><strong>التاريخ:</strong> <span dir="ltr">{formatDate(selectedSlot?.slotDate)}</span></p>
+              <p><strong>التاريخ:</strong> <span dir="ltr">{formatDate(selectedSlot?.date)}</span></p>
               <p><strong>الوقت:</strong> <span dir="ltr">{selectedSlot?.startTime}</span></p>
             </div>
             <div className="pd-form-group">
@@ -2101,9 +2119,24 @@ export default function PatientDashboard() {
               const isExpanded = expandedPrescriptions.has(rx._id);
               const meds = Array.isArray(rx.medications) ? rx.medications : [];
               const dispensedCount = meds.filter((m) => m.isDispensed).length;
+              // A prescription is "fully dispensed" when the backend says so
+              // (status flipped to 'dispensed') OR when every med is marked
+              // as dispensed. Either condition hides the verification code.
+              const isFullyDispensed =
+                rx.status === 'dispensed' ||
+                (meds.length > 0 && dispensedCount === meds.length);
+              // Earliest dispensedAt across meds = when the pharmacy finalized
+              // the dispensing (used for the success banner timestamp).
+              const dispensedDate = meds
+                .map((m) => m.dispensedAt)
+                .filter(Boolean)
+                .sort()[0];
 
               return (
-                <li key={rx._id} className="pd-prescription-card">
+                <li
+                  key={rx._id}
+                  className={`pd-prescription-card${isFullyDispensed ? ' is-fully-dispensed' : ''}`}
+                >
                   <button
                     type="button"
                     className="pd-prescription-head"
@@ -2117,6 +2150,14 @@ export default function PatientDashboard() {
                       </div>
                       <div className="pd-prescription-title">
                         <h3 dir="ltr">{rx.prescriptionNumber}</h3>
+                        {meds.length > 0 && (
+                          <div className="pd-prescription-med-summary" dir="auto">
+                            {meds
+                              .map((m) => m.arabicName || m.medicationName)
+                              .filter(Boolean)
+                              .join('، ')}
+                          </div>
+                        )}
                         <div className="pd-prescription-meta">
                           <span className="pd-prescription-date" dir="ltr">
                             <Calendar size={12} aria-hidden="true" />
@@ -2137,70 +2178,153 @@ export default function PatientDashboard() {
 
                   {isExpanded && (
                     <div id={`pd-rx-body-${rx._id}`} className="pd-prescription-body">
+                      {/* Success banner — prominent "this Rx is done" signal */}
+                      {isFullyDispensed && (
+                        <div className="pd-prescription-dispensed-banner" role="status">
+                          <div className="pd-prescription-dispensed-banner-icon" aria-hidden="true">
+                            <CheckCircle2 size={32} strokeWidth={2.5} />
+                          </div>
+                          <div className="pd-prescription-dispensed-banner-body">
+                            <h4>تم صرف هذه الوصفة</h4>
+                            <p>
+                              {dispensedDate ? (
+                                <>
+                                  تم الصرف بتاريخ{' '}
+                                  <time dateTime={dispensedDate} dir="ltr">
+                                    {formatDate(dispensedDate)}
+                                  </time>
+                                </>
+                              ) : (
+                                'جميع الأدوية في هذه الوصفة تم صرفها'
+                              )}
+                            </p>
+                          </div>
+                        </div>
+                      )}
+
                       {meds.length > 0 && (
                         <section className="pd-prescription-section">
                           <h4 className="pd-prescription-section-title">الأدوية</h4>
                           <ul className="pd-prescription-meds">
-                            {meds.map((med, idx) => (
-                              <li
-                                key={idx}
-                                className={`pd-prescription-med${med.isDispensed ? ' is-dispensed' : ''}`}
-                              >
-                                <div className="pd-prescription-med-head">
-                                  <strong dir="auto">
-                                    {med.medicationName}
-                                    {med.arabicName && (
-                                      <span className="pd-prescription-med-ar">
-                                        {' — '}{med.arabicName}
+                            {meds.map((med, idx) => {
+                              const routeLabel = med.route ? (MED_ROUTE_LABELS[med.route] || med.route) : null;
+                              return (
+                                <li
+                                  key={idx}
+                                  className={`pd-prescription-med${med.isDispensed ? ' is-dispensed' : ''}`}
+                                >
+                                  {/* Header: drug name + dispensed badge */}
+                                  <div className="pd-prescription-med-head">
+                                    <div className="pd-prescription-med-title">
+                                      <span className="pd-prescription-med-icon" aria-hidden="true">
+                                        <Pill size={18} />
+                                      </span>
+                                      <div className="pd-prescription-med-names">
+                                        <strong dir="auto">{med.medicationName}</strong>
+                                        {med.arabicName && (
+                                          <span className="pd-prescription-med-ar" dir="auto">
+                                            {med.arabicName}
+                                          </span>
+                                        )}
+                                      </div>
+                                    </div>
+                                    {med.isDispensed && (
+                                      <span className="pd-prescription-med-badge">
+                                        <CheckCircle2 size={12} aria-hidden="true" />
+                                        <span>مصروف</span>
                                       </span>
                                     )}
-                                  </strong>
-                                  {med.isDispensed && (
-                                    <span className="pd-prescription-med-badge">
-                                      <CheckCircle2 size={12} aria-hidden="true" />
-                                      <span>مصروف</span>
-                                    </span>
+                                  </div>
+
+                                  {/* Field grid: labeled key facts */}
+                                  <dl className="pd-prescription-med-grid">
+                                    {med.dosage && (
+                                      <div className="pd-prescription-med-field">
+                                        <dt>
+                                          <Syringe size={14} aria-hidden="true" />
+                                          <span>الجرعة</span>
+                                        </dt>
+                                        <dd dir="auto">{med.dosage}</dd>
+                                      </div>
+                                    )}
+                                    {med.frequency && (
+                                      <div className="pd-prescription-med-field">
+                                        <dt>
+                                          <Repeat size={14} aria-hidden="true" />
+                                          <span>التكرار</span>
+                                        </dt>
+                                        <dd dir="auto">{med.frequency}</dd>
+                                      </div>
+                                    )}
+                                    {med.duration && (
+                                      <div className="pd-prescription-med-field">
+                                        <dt>
+                                          <Calendar size={14} aria-hidden="true" />
+                                          <span>المدة</span>
+                                        </dt>
+                                        <dd dir="auto">{med.duration}</dd>
+                                      </div>
+                                    )}
+                                    {routeLabel && (
+                                      <div className="pd-prescription-med-field">
+                                        <dt>
+                                          <Navigation size={14} aria-hidden="true" />
+                                          <span>طريقة الاستخدام</span>
+                                        </dt>
+                                        <dd dir="auto">{routeLabel}</dd>
+                                      </div>
+                                    )}
+                                    {med.quantity != null && med.quantity !== '' && (
+                                      <div className="pd-prescription-med-field">
+                                        <dt>
+                                          <Hash size={14} aria-hidden="true" />
+                                          <span>الكمية</span>
+                                        </dt>
+                                        <dd dir="auto">{med.quantity}</dd>
+                                      </div>
+                                    )}
+                                  </dl>
+
+                                  {/* Highlighted instructions callout (safety-critical) */}
+                                  {med.instructions && (
+                                    <aside className="pd-prescription-med-instructions" dir="auto">
+                                      <Info size={14} aria-hidden="true" />
+                                      <div>
+                                        <span className="pd-prescription-med-instructions-label">
+                                          تعليمات الاستخدام
+                                        </span>
+                                        <p>{med.instructions}</p>
+                                      </div>
+                                    </aside>
                                   )}
-                                </div>
-                                <p className="pd-prescription-med-details" dir="auto">
-                                  {[med.dosage, med.frequency, med.duration].filter(Boolean).join(' • ')}
-                                </p>
-                                {med.instructions && (
-                                  <p className="pd-prescription-med-note" dir="auto">{med.instructions}</p>
-                                )}
-                              </li>
-                            ))}
+                                </li>
+                              );
+                            })}
                           </ul>
                         </section>
                       )}
 
-                      <section className="pd-prescription-section pd-prescription-verification">
-                        <h4 className="pd-prescription-section-title">رمز التحقق للصيدلية</h4>
-                        <div className="pd-prescription-code-row">
-                          {rx.verificationCode && (
-                            <div
-                              className="pd-prescription-code-pill"
-                              dir="ltr"
-                              aria-label={`رمز التحقق: ${rx.verificationCode}`}
-                            >
-                              {rx.verificationCode}
+                      {!isFullyDispensed && (
+                        <section className="pd-prescription-section pd-prescription-verification">
+                          <h4 className="pd-prescription-section-title">رمز التحقق للصيدلية</h4>
+                          <div className="pd-prescription-code-row">
+                            {rx.verificationCode && (
+                              <div
+                                className="pd-prescription-code-pill"
+                                dir="ltr"
+                                aria-label={`رمز التحقق: ${rx.verificationCode}`}
+                              >
+                                {rx.verificationCode}
+                              </div>
+                            )}
+                            {/* TODO: replace with real QR render when qrcode.react is added. */}
+                            <div className="pd-prescription-qr-placeholder" aria-label="رمز QR للصرف">
+                              <ShieldCheck size={32} aria-hidden="true" />
+                              <span>رمز QR</span>
                             </div>
-                          )}
-                          {/* TODO: replace with real QR render when qrcode.react is added. */}
-                          <div className="pd-prescription-qr-placeholder" aria-label="رمز QR للصرف">
-                            <ShieldCheck size={32} aria-hidden="true" />
-                            <span>رمز QR</span>
                           </div>
-                        </div>
-                        <p className="pd-prescription-hint">أبرز هذا الرمز للصيدلي عند الصرف.</p>
-                      </section>
-
-                      {rx.expiryDate && (
-                        <div className="pd-prescription-expiry">
-                          <Clock size={14} aria-hidden="true" />
-                          <span>تنتهي في </span>
-                          <span dir="ltr">{formatDate(rx.expiryDate)}</span>
-                        </div>
+                          <p className="pd-prescription-hint">أبرز هذا الرمز للصيدلي عند الصرف.</p>
+                        </section>
                       )}
 
                       {rx.prescriptionNotes && (
@@ -2378,12 +2502,12 @@ export default function PatientDashboard() {
                                   : '';
                                 return (
                                   <tr key={idx} className={rowClass}>
-                                    <td dir="auto">{r.testName}</td>
-                                    <td dir="ltr">
-                                      {r.value}
-                                      {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
-                                    </td>
-                                    <td dir="ltr">{r.referenceRange || '—'}</td>
+                                   <td>{r.testName}</td>
+                                   <td>
+                                    {r.value}
+                                    {r.unit && <span className="pd-lab-unit">{' '}{r.unit}</span>}
+                                     </td>
+                                    <td>{r.referenceRange || '—'}</td>
                                   </tr>
                                 );
                               })}
@@ -2396,7 +2520,7 @@ export default function PatientDashboard() {
 
                       {lab.resultPdfUrl && (
                         <a
-                          href={lab.resultPdfUrl}
+                          href={`http://localhost:5000${lab.resultPdfUrl}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           className="pd-btn pd-btn--ghost pd-lab-pdf-link"

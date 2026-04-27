@@ -18,6 +18,15 @@
  *  - Recent patients quick access (localStorage cached)
  *  - Cmd/Ctrl+K quick search
  *
+ *  ─────────────────────────────────────────────────────────────────────
+ *  LAB TEST ORDER WORKFLOW (updated):
+ *  ─────────────────────────────────────────────────────────────────────
+ *  The doctor no longer picks a specific laboratory when ordering tests.
+ *  The patient is free to walk into ANY laboratory — the technician
+ *  looks up the patient by national ID and sees the pending order.
+ *  This removes the friction of a patient being tied to one lab they
+ *  may not want (or can't reach).
+ *
  *  DB collections this dashboard reads/writes:
  *    persons, children, patients, doctors, visits, prescriptions,
  *    appointments, availability_slots, lab_tests, notifications
@@ -78,6 +87,7 @@ import {
   Download,
 
   // Status / feedback
+  Check,
   CheckCircle2,
   AlertCircle,
   AlertTriangle,
@@ -114,6 +124,13 @@ import {
   Footprints,
   ScanLine,
   Zap,
+
+  // ── أيقونات قسم طلب التحاليل ─────────────────────────────────
+  FlaskConical,
+  TestTube,
+  Beaker,
+  ChevronDown,
+  Building2,
 } from 'lucide-react';
 
 import Navbar from '../components/common/Navbar';
@@ -845,6 +862,28 @@ const DoctorDashboard = () => {
   const [xrayResult, setXrayResult] = useState(null);
 
   /* ─────────────────────────────────────────────────────────────────
+     STATE — طلب تحاليل مختبرية (Lab Test Order)
+     ─────────────────────────────────────────────────────────────────
+     UPDATED: No longer assigns a specific laboratory. The doctor just
+     builds the list of tests; the patient picks any lab they want and
+     the tech looks them up by national ID. See the LAB-TEST-ORDER
+     section header at the top of this file for full context.
+     ───────────────────────────────────────────────────────────────── */
+
+  // التحاليل المضافة للطلب: [{ testName, notes }]
+  const [labTests, setLabTests] = useState([]);
+
+  // الإدخال الحالي قبل إضافة التحليل للقائمة
+  const [newLabTest, setNewLabTest] = useState({
+    testName: '',
+    notes: '',
+  });
+
+  // حالة الإرسال (تتفعّل أثناء حفظ الطلب)
+  // eslint-disable-next-line no-unused-vars
+  const [submittingLabOrder, setSubmittingLabOrder] = useState(false);
+
+  /* ─────────────────────────────────────────────────────────────────
      STATE — appointments
      ───────────────────────────────────────────────────────────────── */
 
@@ -860,6 +899,17 @@ const DoctorDashboard = () => {
     slotDuration: 30,
     maxBookings: 1,
   });
+
+  // Appointment details modal — opened when the doctor clicks a booked cell
+  const [showApptDetails, setShowApptDetails] = useState(false);
+  const [selectedAppointment, setSelectedAppointment] = useState(null);
+  const [cancelingAppt, setCancelingAppt] = useState(false);
+
+  // Slot details modal — opened when the doctor clicks one of their own
+  // available (empty) slots. Lets them remove the slot if unbooked.
+  const [showSlotDetails, setShowSlotDetails] = useState(false);
+  const [selectedSlotDetails, setSelectedSlotDetails] = useState(null);
+  const [deletingSlot, setDeletingSlot] = useState(false);
 
   // Today's metrics (KPI cards on home)
   const [kpis, setKpis] = useState({
@@ -1198,6 +1248,10 @@ const DoctorDashboard = () => {
     setXrayPreview(null);
     setXrayResult(null);
     setXrayModel(null);
+
+    // إعادة تعيين حقول طلب التحاليل
+    setLabTests([]);
+    setNewLabTest({ testName: '', notes: '' });
   }, []);
 
   const handleVitalChange = useCallback((field, value) => {
@@ -1352,6 +1406,12 @@ const DoctorDashboard = () => {
 
   /* ─────────────────────────────────────────────────────────────────
      SAVE VISIT
+     ─────────────────────────────────────────────────────────────────
+     UPDATED for new lab workflow:
+     - No laboratoryId is sent with the lab test payload. The backend
+       now accepts lab tests without a specific lab assigned, leaving
+       the test "free-floating" until any lab tech picks it up via
+       patient national ID search.
      ───────────────────────────────────────────────────────────────── */
 
   const handleSaveVisit = useCallback(async () => {
@@ -1389,14 +1449,68 @@ const DoctorDashboard = () => {
         formData.append('xrayAnalysis', JSON.stringify({ ...xrayResult, model: xrayModel }));
       }
 
-      await doctorAPI.savePatientVisit(nationalId, formData);
+      // Step 1: Save the visit
+      const visitResponse = await doctorAPI.savePatientVisit(nationalId, formData);
+      const newVisitId = visitResponse?.visit?._id || visitResponse?.visitId;
 
-      openModal('success', 'تم الحفظ', 'تم حفظ بيانات الزيارة بنجاح', () => {
+      // Step 2 (optional): Create the lab test order — no laboratory assigned
+      let labOrderResult = null;
+      let labOrderError = null;
+
+      if (labTests.length > 0) {
+        try {
+          setSubmittingLabOrder(true);
+          const labPayload = {
+            // laboratoryId is intentionally omitted — patient picks the lab
+            testsOrdered: labTests.map((t, idx) => ({
+              testCode: `CUSTOM-${idx + 1}`,
+              testName: t.testName,
+              ...(t.notes && { notes: t.notes }),
+            })),
+            priority: 'routine',
+            ...(newVisitId && { visitId: newVisitId }),
+          };
+
+          const isChild = selectedPatient.childRegistrationNumber
+                       || selectedPatient.isChild
+                       || selectedPatient.childId;
+          if (isChild) {
+            labPayload.patientChildId = selectedPatient._id || selectedPatient.childId;
+          } else {
+            labPayload.patientPersonId = selectedPatient._id || selectedPatient.personId;
+          }
+
+          labOrderResult = await doctorAPI.createLabTest(labPayload);
+        } catch (err) {
+          labOrderError = err.message || 'حدث خطأ في إرسال طلب التحاليل';
+          console.error('[DoctorDashboard] Lab order failed:', err);
+        } finally {
+          setSubmittingLabOrder(false);
+        }
+      }
+
+      let successTitle = 'تم الحفظ';
+      let successMessage = 'تم حفظ بيانات الزيارة بنجاح';
+
+      if (labOrderResult?.labTest?.testNumber) {
+        successMessage += `\n\nتم إرسال طلب التحاليل برقم: ${labOrderResult.labTest.testNumber}`;
+        successMessage += `\nيمكن للمريض الذهاب لأي مختبر في سوريا لإجراء التحليل.`;
+      } else if (labOrderError) {
+        successTitle = 'تم الحفظ مع تحذير';
+        successMessage += `\n\nلكن فشل إرسال طلب التحاليل: ${labOrderError}`;
+      }
+
+      openModal('success', successTitle, successMessage, () => {
         closeModal();
-        // Refresh history
-        doctorAPI.getPatientVisits(nationalId)
-          .then((d) => { if (d.visits) setPatientHistory(d.visits); })
-          .catch(() => {});
+        Promise.all([
+          doctorAPI.getPatientVisits(nationalId).catch(() => null),
+          doctorAPI.getMyAppointments().catch(() => null),
+          doctorAPI.getMyAvailabilitySlots().catch(() => null)
+        ]).then(([visitsData, apptsData, slotsData]) => {
+          if (visitsData?.visits) setPatientHistory(visitsData.visits);
+          if (apptsData?.appointments) setAppointments(apptsData.appointments);
+          if (slotsData?.slots) setAvailabilitySlots(slotsData.slots);
+        });
         resetVisitForm();
         setPatientTab('history');
       });
@@ -1410,6 +1524,7 @@ const DoctorDashboard = () => {
     selectedPatient, chiefComplaint, diagnosis, doctorNotes, visitType,
     vitalSigns, medications, followUpDate, followUpNotes, visitPhoto,
     ecgResult, xrayResult, xrayModel, isCardiologist, isOrthopedist,
+    labTests,
     openModal, closeModal, resetVisitForm,
   ]);
 
@@ -1459,6 +1574,135 @@ const DoctorDashboard = () => {
     }
   }, [newSlot, openModal]);
 
+  /**
+   * openApptDetails — opens the appointment details modal for a booked cell.
+   * Called from the calendar when a doctor clicks a "booked" appointment
+   * chip (not an empty cell — empty cells still open the "add slot" modal).
+   */
+  const openApptDetails = useCallback((appt) => {
+    setSelectedAppointment(appt);
+    setShowApptDetails(true);
+  }, []);
+
+  const closeApptDetails = useCallback(() => {
+    setShowApptDetails(false);
+    setSelectedAppointment(null);
+  }, []);
+
+  /**
+   * handleCancelAppt — cancel an appointment on behalf of the doctor.
+   * Uses /api/doctor/appointments/:id/cancel — a doctor-scoped endpoint
+   * that verifies the appointment belongs to the caller and releases
+   * the slot atomically. We do NOT use doctorAPI.cancelAppointment()
+   * because that helper is wired to the patient endpoint in api.js.
+   */
+  const handleCancelAppt = useCallback(async () => {
+    if (!selectedAppointment?._id) return;
+
+    const confirmed = window.confirm(
+      'هل أنت متأكد من إلغاء هذا الموعد؟ سيتم إشعار المريض وتحرير الموعد.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setCancelingAppt(true);
+
+      const token = localStorage.getItem('token');
+      const resp = await fetch(
+        `http://localhost:5000/api/doctor/appointments/${selectedAppointment._id}/cancel`,
+        {
+          method: 'PATCH',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          },
+          body: JSON.stringify({ reason: 'doctor_unavailable' })
+        }
+      );
+
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || payload.success === false) {
+        throw new Error(payload.message || 'فشل إلغاء الموعد');
+      }
+
+      // Refresh both appointments and slots so the calendar updates
+      const [apptsRefreshed, slotsRefreshed] = await Promise.all([
+        doctorAPI.getMyAppointments().catch(() => null),
+        doctorAPI.getMyAvailabilitySlots().catch(() => null)
+      ]);
+      if (apptsRefreshed?.appointments) setAppointments(apptsRefreshed.appointments);
+      if (slotsRefreshed?.slots) setAvailabilitySlots(slotsRefreshed.slots);
+
+      closeApptDetails();
+      openModal('success', 'تم الإلغاء', 'تم إلغاء الموعد وإشعار المريض.');
+    } catch (error) {
+      openModal('error', 'فشل الإلغاء', error.message || 'تعذّر إلغاء الموعد');
+    } finally {
+      setCancelingAppt(false);
+    }
+  }, [selectedAppointment, closeApptDetails, openModal]);
+
+  /**
+   * openSlotDetails / closeSlotDetails — opens the "available slot" details
+   * modal when the doctor clicks one of their empty availability slots.
+   * Entry point for removing a slot the doctor no longer wants to offer.
+   */
+  const openSlotDetails = useCallback((slot) => {
+    setSelectedSlotDetails(slot);
+    setShowSlotDetails(true);
+  }, []);
+
+  const closeSlotDetails = useCallback(() => {
+    setShowSlotDetails(false);
+    setSelectedSlotDetails(null);
+  }, []);
+
+  /**
+   * handleDeleteSlot — deletes an unbooked availability slot.
+   * Calls DELETE /api/doctor/availability-slots/:id which verifies both
+   * ownership and that currentBookings === 0 server-side.
+   */
+  const handleDeleteSlot = useCallback(async () => {
+    if (!selectedSlotDetails?._id) return;
+
+    const confirmed = window.confirm(
+      'هل أنت متأكد من حذف هذا الموعد المتاح؟ لن يتمكن المرضى من حجزه بعد الحذف.'
+    );
+    if (!confirmed) return;
+
+    try {
+      setDeletingSlot(true);
+
+      const token = localStorage.getItem('token');
+      const resp = await fetch(
+        `http://localhost:5000/api/doctor/availability-slots/${selectedSlotDetails._id}`,
+        {
+          method: 'DELETE',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${token}`
+          }
+        }
+      );
+
+      const payload = await resp.json().catch(() => ({}));
+      if (!resp.ok || payload.success === false) {
+        throw new Error(payload.message || 'فشل حذف الموعد');
+      }
+
+      // Refresh the slot list
+      const refreshed = await doctorAPI.getMyAvailabilitySlots().catch(() => null);
+      if (refreshed?.slots) setAvailabilitySlots(refreshed.slots);
+
+      closeSlotDetails();
+      openModal('success', 'تم الحذف', 'تم حذف الموعد المتاح.');
+    } catch (error) {
+      openModal('error', 'فشل الحذف', error.message || 'تعذّر حذف الموعد');
+    } finally {
+      setDeletingSlot(false);
+    }
+  }, [selectedSlotDetails, closeSlotDetails, openModal]);
+
   /* ─────────────────────────────────────────────────────────────────
      NOTIFICATION HANDLERS
      ───────────────────────────────────────────────────────────────── */
@@ -1505,22 +1749,7 @@ const DoctorDashboard = () => {
 
   if (!user) return null;
 
-  // ──────────────────────────────────────────────────────────────────
-  // RENDER CONTINUES IN PART B & PART C
-  // ──────────────────────────────────────────────────────────────────
-  // Part B will contain:
-  //   - Sidebar component
-  //   - Main return() with all section renders:
-  //     1. Home (greeting + KPIs + today appts + recent activity)
-  //     2. Appointments (week calendar with slot management)
-  //     3. Patient Lookup (search hero + recent patients)
-  //
-  // Part C will contain:
-  //   - Patient Record render (4 tabs: overview / history / new visit)
-  //   - AI Tools render (cardiologist ECG + orthopedist X-Ray)
-  //   - Notifications panel
-  //   - Slot creation modal
-  //   - Closing }} and export
+
   /* ═════════════════════════════════════════════════════════════════
      RENDER — main shell, sidebar, and primary sections
      ═════════════════════════════════════════════════════════════════ */
@@ -2043,33 +2272,72 @@ const DoctorDashboard = () => {
                       // Find slots/appointments for this cell
                       const cellDateStr = day.toISOString().split('T')[0];
                       const cellSlots = availabilitySlots.filter((s) => {
+                        // Hide expired and booked slots — expired slots are
+                        // historical records (auto-marked by the schema once
+                        // their time passed) and booked slots are already
+                        // represented by the appointment chip in the same
+                        // cell. Show only slots the doctor can still act on.
+                        if (s.status !== 'available' && s.status !== 'blocked') return false;
+                        if (s.isAvailable === false && s.status !== 'blocked') return false;
                         const sDate = new Date(s.date).toISOString().split('T')[0];
                         const startHour = parseInt((s.startTime || '').split(':')[0], 10);
                         return sDate === cellDateStr && startHour === hour;
                       });
+                      // Only show LIVE appointments — exclude cancelled + no-show so
+                      // the doctor's calendar stays in sync with what patients see.
                       const cellAppts = appointments.filter((a) => {
+                        if (a.status === 'cancelled' || a.status === 'no_show') return false;
                         const aDate = new Date(a.appointmentDate).toISOString().split('T')[0];
                         const aHour = parseInt((a.appointmentTime || '').split(':')[0], 10);
                         return aDate === cellDateStr && aHour === hour;
                       });
+
+                      // The outer cell opens the "add slot" modal — but ONLY
+                      // when the cell is truly empty (no appointments AND no
+                      // availability slots). If there's already content, the
+                      // chip's own onClick handles the interaction.
+                      const handleCellClick = () => {
+                        if (isPast) return;
+                        if (cellAppts.length > 0) return; // booked chip handles it
+                        if (cellSlots.length > 0) return; // available chip handles it
+                        openSlotModal(day, hour);
+                      };
 
                       return (
                         <button
                           key={`${hour}-${dayIdx}`}
                           type="button"
                           className={`dd-cal-cell ${isToday ? 'today' : ''} ${isPast ? 'past' : ''}`}
-                          onClick={() => !isPast && openSlotModal(day, hour)}
+                          onClick={handleCellClick}
                           disabled={isPast}
                           aria-label={`${day.toLocaleDateString('ar-EG')} ${hour}:00`}
                         >
                           {cellAppts.map((appt) => (
                             <div
                               key={appt._id}
+                              role="button"
+                              tabIndex={0}
                               className={`dd-cal-slot ${appt.priority === 'emergency' ? 'emergency' : 'booked'}`}
-                              style={{ top: 4, height: 'calc(100% - 8px)' }}
+                              style={{ top: 4, height: 'calc(100% - 8px)', cursor: 'pointer' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openApptDetails(appt);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  openApptDetails(appt);
+                                }
+                              }}
+                              title="انقر لعرض تفاصيل الموعد"
                             >
                               <span className="dd-cal-slot-name">
-                                {appt.patientName || 'مريض'}
+                                {appt.patientPersonId?.firstName
+                                  ? `${appt.patientPersonId.firstName} ${appt.patientPersonId.lastName || ''}`.trim()
+                                  : appt.patientChildId?.firstName
+                                  ? `${appt.patientChildId.firstName} ${appt.patientChildId.lastName || ''}`.trim()
+                                  : appt.patientName || 'مريض'}
                               </span>
                               <span className="dd-cal-slot-time">{appt.appointmentTime}</span>
                             </div>
@@ -2077,8 +2345,22 @@ const DoctorDashboard = () => {
                           {cellSlots.length > 0 && cellAppts.length === 0 && cellSlots.map((slot) => (
                             <div
                               key={slot._id}
+                              role="button"
+                              tabIndex={0}
                               className={`dd-cal-slot ${slot.status === 'blocked' ? 'blocked' : 'available'}`}
-                              style={{ top: 4, height: 'calc(100% - 8px)' }}
+                              style={{ top: 4, height: 'calc(100% - 8px)', cursor: 'pointer' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                openSlotDetails(slot);
+                              }}
+                              onKeyDown={(e) => {
+                                if (e.key === 'Enter' || e.key === ' ') {
+                                  e.preventDefault();
+                                  e.stopPropagation();
+                                  openSlotDetails(slot);
+                                }
+                              }}
+                              title="انقر لعرض تفاصيل الموعد المتاح"
                             >
                               <span className="dd-cal-slot-name">
                                 {slot.status === 'blocked' ? 'محجوز' : 'متاح'}
@@ -2250,9 +2532,28 @@ const DoctorDashboard = () => {
                         key={idx}
                         type="button"
                         className="dd-recent-patient-card"
-                        onClick={() => {
-                          setSearchId(p.nationalId || p.childRegistrationNumber || '');
-                          selectPatient(p);
+                        onClick={async () => {
+                          const id = p.nationalId || p.childRegistrationNumber || '';
+                          setSearchId(id);
+                          if (!id) return;
+                          // Re-fetch the full patient record from /search so
+                          // medical fields (bloodType, allergies, etc.) are
+                          // included. The localStorage cache only stores a
+                          // lightweight copy (name + nationalId) so clicking
+                          // a recent card must not reuse that stale object.
+                          try {
+                            const data = await doctorAPI.searchPatient(id);
+                            if (data?.patient) {
+                              await selectPatient(data.patient);
+                            } else {
+                              // Fall back to the cached lite object if the
+                              // backend didn't return anything useful.
+                              await selectPatient(p);
+                            }
+                          } catch (err) {
+                            console.error('[DoctorDashboard] Recent patient reload error:', err);
+                            await selectPatient(p);
+                          }
                         }}
                       >
                         <div className="dd-recent-patient-avatar">
@@ -2293,10 +2594,6 @@ const DoctorDashboard = () => {
             </>
           )}
 
-          {/* ───────────────────────────────────────────────────
-              PATIENT RECORD CONTINUES IN PART C
-              (renders when activeSection === 'lookup' && selectedPatient)
-              ─────────────────────────────────────────────────── */}
           {/* ───────────────────────────────────────────────────
               PATIENT RECORD (when a patient is selected)
               ─────────────────────────────────────────────────── */}
@@ -2752,6 +3049,62 @@ const DoctorDashboard = () => {
                               </div>
                             )}
 
+                            {visit.labTests && visit.labTests.length > 0 && (
+                              <div className="dd-visit-section">
+                                <span className="dd-visit-label">التحاليل المختبرية ({visit.labTests.length})</span>
+                                <div className="dd-visit-labs">
+                                  {visit.labTests.map((lab) => (
+                                    <div key={lab._id} className="dd-visit-lab-item">
+                                      <div className="dd-visit-lab-icon">
+                                        <FlaskConical size={18} />
+                                      </div>
+                                      <div className="dd-visit-lab-info">
+                                        <div className="dd-visit-lab-header">
+                                          <span className="dd-visit-lab-number">{lab.testNumber}</span>
+                                          <span className={`dd-visit-lab-status ${lab.status}`}>
+                                            {lab.status === 'completed' && 'مكتمل'}
+                                            {lab.status === 'ordered' && 'معلّق'}
+                                            {lab.status === 'scheduled' && 'مجدول'}
+                                            {lab.status === 'sample_collected' && 'تم جمع العينة'}
+                                            {lab.status === 'in_progress' && 'قيد المعالجة'}
+                                            {lab.status === 'rejected' && 'مرفوض'}
+                                            {lab.status === 'cancelled' && 'ملغى'}
+                                          </span>
+                                        </div>
+                                        {lab.testsOrdered?.length > 0 && (
+                                          <div className="dd-visit-lab-tests">
+                                            {lab.testsOrdered.map((t, i) => (
+                                              <span key={i} className="dd-visit-lab-test-chip">
+                                                {t.testName}{t.testCode ? ` (${t.testCode})` : ''}
+                                              </span>
+                                            ))}
+                                          </div>
+                                        )}
+                                        {lab.laboratoryId && (
+                                          <div className="dd-visit-lab-lab">
+                                            <Building2 size={12} />
+                                            <span>{lab.laboratoryId.arabicName || lab.laboratoryId.name}</span>
+                                          </div>
+                                        )}
+                                      </div>
+                                      {lab.resultPdfUrl && (
+                                        <a
+                                          href={`http://localhost:5000${lab.resultPdfUrl}`}
+                                          target="_blank"
+                                          rel="noopener noreferrer"
+                                          className="dd-visit-lab-pdf-btn"
+                                          title="عرض تقرير النتائج"
+                                        >
+                                          <FileText size={16} />
+                                          <span>عرض التقرير</span>
+                                        </a>
+                                      )}
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+
                             {visit.doctorNotes && (
                               <div className="dd-visit-section">
                                 <span className="dd-visit-label">ملاحظات الطبيب</span>
@@ -2818,7 +3171,7 @@ const DoctorDashboard = () => {
                     />
                   </section>
 
-                  {/* Vital signs grid (THE NEW FEATURE) */}
+                  {/* Vital signs grid */}
                   <section className="dd-form-section">
                     <div className="dd-form-section-header">
                       <div className="dd-form-section-icon">
@@ -2968,6 +3321,153 @@ const DoctorDashboard = () => {
                     </div>
                   </section>
 
+                  {/* ═══════════════════════════════════════════════
+                       LAB TEST ORDER SECTION — طلب تحاليل مختبرية
+                       ─────────────────────────────────────────────
+                       UPDATED WORKFLOW: No lab selection dropdown.
+                       Doctor just builds the list of tests; patient
+                       chooses ANY lab and the tech looks them up by
+                       national ID.
+                      ═══════════════════════════════════════════════ */}
+                  <section className="dd-form-section dd-lab-order-section">
+                    <div className="dd-form-section-header">
+                      <div className="dd-form-section-icon">
+                        <FlaskConical size={20} strokeWidth={2} />
+                      </div>
+                      <h3 className="dd-form-section-title">طلب تحاليل مختبرية (اختياري)</h3>
+                    </div>
+
+                    {/* Info banner — replaces the old lab dropdown */}
+                    <div
+                      className="dd-lab-info-banner"
+                      style={{
+                        display: 'flex',
+                        alignItems: 'flex-start',
+                        gap: 12,
+                        padding: '14px 16px',
+                        background: 'rgba(var(--tm-action-rgb), 0.08)',
+                        border: '1px solid rgba(var(--tm-action-rgb), 0.22)',
+                        borderRadius: 12,
+                        marginBottom: 16,
+                        fontFamily: 'Cairo, sans-serif'
+                      }}
+                    >
+                      <div
+                        style={{
+                          flexShrink: 0,
+                          width: 36,
+                          height: 36,
+                          borderRadius: 10,
+                          background: 'var(--tm-action)',
+                          color: '#FFFFFF',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center'
+                        }}
+                      >
+                        <Info size={18} strokeWidth={2.2} />
+                      </div>
+                      <div style={{ flex: 1, lineHeight: 1.7 }}>
+                        <h4
+                          style={{
+                            margin: 0,
+                            marginBottom: 4,
+                            fontSize: '0.95rem',
+                            fontWeight: 700,
+                            color: 'var(--tm-primary)'
+                          }}
+                        >
+                          المريض حر باختيار المختبر
+                        </h4>
+                        <p
+                          style={{
+                            margin: 0,
+                            fontSize: '0.825rem',
+                            color: 'var(--tm-text-secondary)'
+                          }}
+                        >
+                          يذهب المريض بالرقم الوطني لأي مختبر في سوريا ويجد طلب التحاليل جاهزاً عند فني المختبر.
+                          لا حاجة لاختيار مختبر محدد.
+                        </p>
+                      </div>
+                    </div>
+
+                    {/* إضافة تحليل جديد */}
+                    <div className="dd-field-row">
+                      <div className="dd-field" style={{ flex: 2 }}>
+                        <label className="dd-field-label">اسم التحليل</label>
+                        <input
+                          type="text"
+                          className="dd-input"
+                          value={newLabTest.testName}
+                          onChange={(e) => setNewLabTest({ ...newLabTest, testName: e.target.value })}
+                          placeholder="مثال: تعداد دم كامل (CBC)"
+                        />
+                      </div>
+                      <div className="dd-field" style={{ flex: 3 }}>
+                        <label className="dd-field-label">ملاحظات (اختياري)</label>
+                        <input
+                          type="text"
+                          className="dd-input"
+                          value={newLabTest.notes}
+                          onChange={(e) => setNewLabTest({ ...newLabTest, notes: e.target.value })}
+                          placeholder="مثال: على معدة فارغة"
+                        />
+                      </div>
+                    </div>
+
+                    <button
+                      type="button"
+                      className="dd-add-med-btn"
+                      onClick={() => {
+                        if (!newLabTest.testName.trim()) {
+                          openModal('error', 'حقل مطلوب', 'الرجاء إدخال اسم التحليل');
+                          return;
+                        }
+                        setLabTests((prev) => [
+                          ...prev,
+                          { ...newLabTest, id: Date.now() }
+                        ]);
+                        setNewLabTest({ testName: '', notes: '' });
+                      }}
+                      disabled={!newLabTest.testName.trim()}
+                    >
+                      <Plus size={18} strokeWidth={2.2} />
+                      <span>إضافة التحليل</span>
+                    </button>
+
+                    {/* قائمة التحاليل المضافة */}
+                    {labTests.length > 0 && (
+                      <div className="dd-lab-tests-list">
+                        <div className="dd-lab-tests-header">
+                          <TestTube size={16} strokeWidth={2.2} />
+                          <span>التحاليل المضافة ({labTests.length})</span>
+                        </div>
+                        {labTests.map((test) => (
+                          <div key={test.id} className="dd-lab-test-item">
+                            <div className="dd-lab-test-info">
+                              <strong className="dd-lab-test-name">
+                                <FlaskConical size={14} strokeWidth={2.2} />
+                                {test.testName}
+                              </strong>
+                              {test.notes && (
+                                <span className="dd-lab-test-notes">{test.notes}</span>
+                              )}
+                            </div>
+                            <button
+                              type="button"
+                              className="dd-lab-test-remove"
+                              onClick={() => setLabTests((prev) => prev.filter((t) => t.id !== test.id))}
+                              aria-label="إزالة التحليل"
+                            >
+                              <X size={16} strokeWidth={2.5} />
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                  </section>
+
                   {/* Doctor notes */}
                   <section className="dd-form-section">
                     <div className="dd-form-section-header">
@@ -3100,7 +3600,6 @@ const DoctorDashboard = () => {
               {/* ═══ TAB: AI Tools (cardiologist or orthopedist) ═══ */}
               {patientTab === 'ai' && hasAITools && (
                 <>
-                  {/* Render the appropriate AI tool inline */}
                   {isCardiologist && renderECGTool()}
                   {isOrthopedist && renderXRayTool()}
                 </>
@@ -3143,6 +3642,7 @@ const DoctorDashboard = () => {
           )}
         </main>
       </div>
+
 
       {/* ═══════════════════════════════════════════════════════════════
           AVAILABILITY SLOT CREATION MODAL
@@ -3238,6 +3738,311 @@ const DoctorDashboard = () => {
           </div>
         </div>
       )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          APPOINTMENT DETAILS MODAL
+          ═══════════════════════════════════════════════════════════════ */}
+      {showApptDetails && selectedAppointment && (
+        <div
+          className="dd-modal-overlay"
+          onClick={closeApptDetails}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="dd-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="dd-modal-header">
+              <div className="dd-modal-icon-wrapper">
+                <div className="dd-modal-icon success">
+                  <User size={36} strokeWidth={2} />
+                </div>
+                <div className="dd-modal-icon-pulse success" />
+              </div>
+              <h2>تفاصيل الموعد</h2>
+            </div>
+
+            <div className="dd-modal-body">
+              {(() => {
+                const appt = selectedAppointment;
+                const patient = appt.patientPersonId || appt.patientChildId || {};
+                const fullName = [
+                  patient.firstName,
+                  patient.fatherName,
+                  patient.lastName
+                ].filter(Boolean).join(' ') || 'غير محدد';
+                const idDisplay =
+                  patient.nationalId
+                  || patient.childRegistrationNumber
+                  || 'غير محدد';
+                const phone = patient.phoneNumber || 'غير محدد';
+
+                const STATUS_LABELS = {
+                  scheduled:   { label: 'مجدول',   cls: 'info'    },
+                  confirmed:   { label: 'مؤكد',    cls: 'success' },
+                  checked_in:  { label: 'وصل',     cls: 'success' },
+                  in_progress: { label: 'جارٍ',    cls: 'warn'    },
+                  completed:   { label: 'منتهٍ',   cls: 'muted'   },
+                  cancelled:   { label: 'ملغى',    cls: 'danger'  },
+                  no_show:     { label: 'لم يحضر', cls: 'danger'  },
+                  rescheduled: { label: 'مُعاد',   cls: 'warn'    }
+                };
+                const statusMeta = STATUS_LABELS[appt.status] || { label: appt.status, cls: 'muted' };
+
+                const dateStr = appt.appointmentDate
+                  ? new Date(appt.appointmentDate).toLocaleDateString('ar-EG', {
+                      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                    })
+                  : 'غير محدد';
+
+                const Row = ({ icon: Icon, label, value, dir = 'auto' }) => (
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
+                      borderBottom: '1px solid var(--tm-surface, #E0F2F1)'
+                    }}
+                  >
+                    <Icon size={18} strokeWidth={2} style={{ color: 'var(--tm-action, #00897B)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{label}</div>
+                      <div dir={dir} style={{ fontSize: 14, fontWeight: 600, color: 'var(--tm-primary, #0D3B3E)' }}>
+                        {value}
+                      </div>
+                    </div>
+                  </div>
+                );
+
+                const canCancel = ['scheduled', 'confirmed', 'checked_in'].includes(appt.status);
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <Row icon={User}        label="اسم المريض"     value={fullName} />
+                    <Row icon={IdCard}      label="الرقم الوطني"    value={idDisplay} dir="ltr" />
+                    <Row icon={Phone}       label="رقم الهاتف"     value={phone} dir="ltr" />
+                    <Row icon={Calendar}    label="التاريخ"        value={dateStr} />
+                    <Row icon={Clock}       label="الوقت"          value={appt.appointmentTime || 'غير محدد'} dir="ltr" />
+                    <Row
+                      icon={FileText}
+                      label="سبب الزيارة"
+                      value={appt.reasonForVisit || 'لم يُحدَّد'}
+                    />
+                    <div style={{ padding: '10px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <Info size={18} strokeWidth={2} style={{ color: 'var(--tm-action, #00897B)' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>الحالة</div>
+                        <span
+                          style={{
+                            display: 'inline-block', padding: '4px 12px', borderRadius: 999,
+                            fontSize: 12, fontWeight: 700,
+                            background:
+                              statusMeta.cls === 'success' ? 'rgba(0,137,123,0.12)'
+                              : statusMeta.cls === 'warn'  ? 'rgba(245,158,11,0.12)'
+                              : statusMeta.cls === 'danger'? 'rgba(220,38,38,0.12)'
+                              : statusMeta.cls === 'info'  ? 'rgba(13,59,62,0.08)'
+                              : 'rgba(107,114,128,0.12)',
+                            color:
+                              statusMeta.cls === 'success' ? '#00897B'
+                              : statusMeta.cls === 'warn'  ? '#b45309'
+                              : statusMeta.cls === 'danger'? '#991b1b'
+                              : statusMeta.cls === 'info'  ? '#0D3B3E'
+                              : '#4b5563'
+                          }}
+                        >
+                          {statusMeta.label}
+                        </span>
+                      </div>
+                    </div>
+
+                    {!canCancel && (
+                      <div
+                        style={{
+                          marginTop: 12, padding: 10, borderRadius: 8,
+                          background: 'rgba(107,114,128,0.08)', color: '#6b7280',
+                          fontSize: 13
+                        }}
+                      >
+                        لا يمكن إلغاء هذا الموعد لأنه في حالة "{statusMeta.label}".
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="dd-modal-footer">
+              <button
+                type="button"
+                className="dd-btn dd-btn-secondary"
+                onClick={closeApptDetails}
+                disabled={cancelingAppt}
+              >
+                إغلاق
+              </button>
+              {['scheduled', 'confirmed', 'checked_in'].includes(selectedAppointment.status) && (
+                <button
+                  type="button"
+                  className="dd-btn dd-btn-primary"
+                  style={{ background: '#dc2626', borderColor: '#dc2626' }}
+                  onClick={handleCancelAppt}
+                  disabled={cancelingAppt}
+                >
+                  {cancelingAppt ? (
+                    <>
+                      <Loader2 size={16} className="dd-spin" />
+                      جاري الإلغاء…
+                    </>
+                  ) : (
+                    <>
+                      <XCircle size={16} strokeWidth={2.2} />
+                      إلغاء الموعد
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════
+          AVAILABLE-SLOT DETAILS MODAL
+          ═══════════════════════════════════════════════════════════════ */}
+      {showSlotDetails && selectedSlotDetails && (
+        <div
+          className="dd-modal-overlay"
+          onClick={closeSlotDetails}
+          role="dialog"
+          aria-modal="true"
+        >
+          <div className="dd-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="dd-modal-header">
+              <div className="dd-modal-icon-wrapper">
+                <div className="dd-modal-icon success">
+                  <CalendarDays size={36} strokeWidth={2} />
+                </div>
+                <div className="dd-modal-icon-pulse success" />
+              </div>
+              <h2>تفاصيل الموعد المتاح</h2>
+            </div>
+
+            <div className="dd-modal-body">
+              {(() => {
+                const slot = selectedSlotDetails;
+                const dateStr = slot.date
+                  ? new Date(slot.date).toLocaleDateString('ar-EG', {
+                      weekday: 'long', year: 'numeric', month: 'long', day: 'numeric'
+                    })
+                  : 'غير محدد';
+                const isBlocked = slot.status === 'blocked';
+                const hasBookings = typeof slot.currentBookings === 'number' && slot.currentBookings > 0;
+
+                const Row = ({ icon: Icon, label, value, dir = 'auto' }) => (
+                  <div
+                    style={{
+                      display: 'flex', alignItems: 'center', gap: 10, padding: '10px 0',
+                      borderBottom: '1px solid var(--tm-surface, #E0F2F1)'
+                    }}
+                  >
+                    <Icon size={18} strokeWidth={2} style={{ color: 'var(--tm-action, #00897B)', flexShrink: 0 }} />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 2 }}>{label}</div>
+                      <div dir={dir} style={{ fontSize: 14, fontWeight: 600, color: 'var(--tm-primary, #0D3B3E)' }}>
+                        {value}
+                      </div>
+                    </div>
+                  </div>
+                );
+
+                return (
+                  <div style={{ display: 'flex', flexDirection: 'column' }}>
+                    <Row icon={Calendar} label="التاريخ" value={dateStr} />
+                    <Row
+                      icon={Clock}
+                      label="الوقت"
+                      value={`${slot.startTime || '—'} — ${slot.endTime || '—'}`}
+                      dir="ltr"
+                    />
+                    <Row
+                      icon={Info}
+                      label="مدة الموعد"
+                      value={`${slot.slotDuration || 30} دقيقة`}
+                    />
+                    <Row
+                      icon={Users}
+                      label="الحجوزات"
+                      value={`${slot.currentBookings || 0} / ${slot.maxBookings || 1}`}
+                      dir="ltr"
+                    />
+                    <div style={{ padding: '10px 0', display: 'flex', alignItems: 'center', gap: 10 }}>
+                      <ShieldCheck size={18} strokeWidth={2} style={{ color: 'var(--tm-action, #00897B)' }} />
+                      <div style={{ flex: 1 }}>
+                        <div style={{ fontSize: 12, color: '#6b7280', marginBottom: 4 }}>الحالة</div>
+                        <span
+                          style={{
+                            display: 'inline-block', padding: '4px 12px', borderRadius: 999,
+                            fontSize: 12, fontWeight: 700,
+                            background: isBlocked
+                              ? 'rgba(107,114,128,0.12)'
+                              : 'rgba(0,137,123,0.12)',
+                            color: isBlocked ? '#4b5563' : '#00897B'
+                          }}
+                        >
+                          {isBlocked ? 'محظور' : 'متاح للحجز'}
+                        </span>
+                      </div>
+                    </div>
+
+                    {hasBookings && (
+                      <div
+                        style={{
+                          marginTop: 12, padding: 10, borderRadius: 8,
+                          background: 'rgba(245,158,11,0.12)', color: '#b45309',
+                          fontSize: 13, display: 'flex', alignItems: 'flex-start', gap: 8
+                        }}
+                      >
+                        <AlertTriangle size={16} style={{ flexShrink: 0, marginTop: 2 }} />
+                        <span>
+                          هذا الموعد مرتبط بحجز حالي. لحذفه، يرجى إلغاء الحجز أولاً.
+                        </span>
+                      </div>
+                    )}
+                  </div>
+                );
+              })()}
+            </div>
+
+            <div className="dd-modal-footer">
+              <button
+                type="button"
+                className="dd-btn dd-btn-secondary"
+                onClick={closeSlotDetails}
+                disabled={deletingSlot}
+              >
+                إغلاق
+              </button>
+              {!(typeof selectedSlotDetails.currentBookings === 'number' && selectedSlotDetails.currentBookings > 0) && (
+                <button
+                  type="button"
+                  className="dd-btn dd-btn-primary"
+                  style={{ background: '#dc2626', borderColor: '#dc2626' }}
+                  onClick={handleDeleteSlot}
+                  disabled={deletingSlot}
+                >
+                  {deletingSlot ? (
+                    <>
+                      <Loader2 size={16} className="dd-spin" />
+                      جاري الحذف…
+                    </>
+                  ) : (
+                    <>
+                      <Trash2 size={16} strokeWidth={2.2} />
+                      حذف الموعد
+                    </>
+                  )}
+                </button>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 
@@ -3255,7 +4060,6 @@ const DoctorDashboard = () => {
     ) : null;
     const ConditionIcon = condition?.Icon || Heart;
 
-    // Normalize predictions to a consistent shape
     const allPredictions = ecgResult?.all_predictions
                         || ecgResult?.predictions
                         || ecgResult?.top_predictions

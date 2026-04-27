@@ -1,103 +1,198 @@
-const jwt = require('jsonwebtoken');
-const Account = require('../models/Account');
-const Person = require('../models/Person');
-const Patient = require('../models/Patient');
-const Doctor = require('../models/Doctor');
-const Admin = require('../models/Admin');
+/**
+ * ═══════════════════════════════════════════════════════════════════════════
+ *  Auth Controller — Patient 360°
+ *  ─────────────────────────────────────────────────────────────────────────
+ *  Public-facing authentication endpoints. All routes mounted under /api/auth.
+ *
+ *  Functions:
+ *    1. signup                       — Patient self-registration (adult or child)
+ *    2. login                        — Email/password login (all roles)
+ *    3. verifyToken                  — Re-validate a JWT and return user info
+ *    4. updateLastLogin              — Stamp last login time
+ *    5. registerDoctorRequest        — Doctor application with file uploads
+ *    6. forgotPassword               — Send 6-digit OTP to email
+ *    7. verifyOTP                    — Confirm OTP is correct
+ *    8. resetPassword                — Set new password using verified OTP
+ *    9. checkDoctorRequestStatus     — Doctor checks if their request was approved
+ *   10. registerPharmacistRequest    — Pharmacist application with file uploads
+ *   11. registerLabTechnicianRequest — Lab technician application with file uploads
+ *   12. checkProfessionalStatus      — Unified status check (doctor/pharmacist/lab)
+ * ═══════════════════════════════════════════════════════════════════════════
+ */
 
-// ✅ FORGET PASSWORD: Import email utilities
+const jwt = require('jsonwebtoken');
+const bcrypt = require('bcryptjs');
+
+const {
+  Account,
+  Person,
+  Children,
+  Patient,
+  Doctor,
+  DoctorRequest
+} = require('../models');
+
 const { sendEmail, generateOTP, createOTPEmailTemplate } = require('../utils/sendEmail');
 
-// Generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+// ============================================================================
+// HELPERS
+// ============================================================================
+
+const generateToken = (accountId) => {
+  return jwt.sign({ id: accountId }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || '7d'
   });
 };
 
-// @desc    Register new patient
-// @route   POST /api/auth/register (or /api/auth/signup)
-// @access  Public
+const calculateAgeYears = (dateOfBirth) => {
+  const birth = new Date(dateOfBirth);
+  const today = new Date();
+  let age = today.getFullYear() - birth.getFullYear();
+  const monthDiff = today.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && today.getDate() < birth.getDate())) {
+    age -= 1;
+  }
+  return age;
+};
+
+const buildRoleData = async (account) => {
+  const roleData = {};
+
+  for (const role of account.roles) {
+    if (role === 'patient') {
+      const query = account.personId
+        ? { personId: account.personId }
+        : { childId: account.childId };
+      const patient = await Patient.findOne(query).lean();
+      if (patient) {
+        roleData.patient = {
+          bloodType: patient.bloodType,
+          height: patient.height,
+          weight: patient.weight,
+          bmi: patient.bmi,
+          allergies: patient.allergies,
+          chronicDiseases: patient.chronicDiseases,
+          familyHistory: patient.familyHistory,
+          smokingStatus: patient.smokingStatus,
+          emergencyContact: patient.emergencyContact
+        };
+      }
+    }
+
+    if (role === 'doctor' && account.personId) {
+      const doctor = await Doctor.findOne({ personId: account.personId }).lean();
+      if (doctor) {
+        roleData.doctor = {
+          medicalLicenseNumber: doctor.medicalLicenseNumber,
+          specialization: doctor.specialization,
+          subSpecialization: doctor.subSpecialization,
+          yearsOfExperience: doctor.yearsOfExperience,
+          hospitalAffiliation: doctor.hospitalAffiliation,
+          consultationFee: doctor.consultationFee,
+          isECGSpecialist: doctor.isECGSpecialist
+        };
+      }
+    }
+
+    if (role === 'admin') {
+      roleData.admin = { hasAdminAccess: true };
+    }
+  }
+
+  return roleData;
+};
+
+const buildUserResponse = (account, profile, roleData = {}) => {
+  const isChildAccount = !!account.childId;
+
+  return {
+    accountId: account._id,
+    email: account.email,
+    roles: account.roles,
+    isActive: account.isActive,
+
+    personId: account.personId || null,
+    childId: account.childId || null,
+    isMinor: isChildAccount,
+
+    firstName: profile.firstName,
+    fatherName: profile.fatherName,
+    lastName: profile.lastName,
+    motherName: profile.motherName,
+
+    nationalId: profile.nationalId || null,
+    childRegistrationNumber: profile.childRegistrationNumber || null,
+
+    phoneNumber: profile.phoneNumber,
+    dateOfBirth: profile.dateOfBirth,
+    gender: profile.gender,
+    address: profile.address,
+    governorate: profile.governorate,
+    city: profile.city,
+
+    roleData
+  };
+};
+
+// ============================================================================
+// 1. SIGNUP
+// ============================================================================
+
 exports.signup = async (req, res) => {
-  console.log('🔵 Signup request received');
-  console.log('📦 Request body:', req.body);
-  
+  console.log('🔵 ========== SIGNUP REQUEST ==========');
+
   try {
     const {
-      // Person data
+      firstName, fatherName, lastName, motherName,
+      dateOfBirth, gender, phoneNumber, address,
+      governorate, city,
       nationalId,
       parentNationalId,
-      isMinor,
-      firstName,
-      lastName,
-      dateOfBirth,
-      gender,
-      phoneNumber,
-      address,
-      
-      // Account data
-      email,
-      password,
-      
-      // Patient data
-      bloodType,
-      height,
-      weight,
-      smokingStatus,
-      allergies,
-      chronicDiseases,
-      familyHistory,
-      
-      // Emergency Contact
+      email, password,
+      bloodType, height, weight, smokingStatus,
+      allergies, chronicDiseases, familyHistory,
       emergencyContact,
       emergencyContactName,
       emergencyContactRelationship,
       emergencyContactPhone
     } = req.body;
 
-    console.log('✅ Step 1: Data extracted from body');
+    console.log('📦 Email:', email);
+    console.log('📦 Date of birth:', dateOfBirth);
 
-    // ========================================
-    // 1. Extract Emergency Contact
-    // ========================================
-    let emergencyName, emergencyRelationship, emergencyPhone;
-    
+    let emergencyName;
+    let emergencyRelationship;
+    let emergencyPhone;
+
     if (emergencyContact && typeof emergencyContact === 'object') {
       emergencyName = emergencyContact.name;
       emergencyRelationship = emergencyContact.relationship;
-      emergencyPhone = emergencyContact.phone;
-      console.log('✅ Emergency contact format: OBJECT');
+      emergencyPhone = emergencyContact.phoneNumber || emergencyContact.phone;
     } else {
       emergencyName = emergencyContactName;
       emergencyRelationship = emergencyContactRelationship;
       emergencyPhone = emergencyContactPhone;
-      console.log('✅ Emergency contact format: SEPARATE FIELDS');
     }
 
-    // ========================================
-    // 2. التحقق من وجود البيانات المطلوبة
-    // ========================================
-    if (!firstName || !lastName || !dateOfBirth || !gender || !phoneNumber || !email || !password) {
-      console.log('❌ Missing required fields');
-      return res.status(400).json({
-        success: false,
-        message: 'جميع الحقول المطلوبة يجب أن تكون موجودة'
-      });
-    }
+    const missingFields = [];
+    if (!firstName) missingFields.push('firstName');
+    if (!fatherName) missingFields.push('fatherName');
+    if (!lastName) missingFields.push('lastName');
+    if (!motherName) missingFields.push('motherName');
+    if (!dateOfBirth) missingFields.push('dateOfBirth');
+    if (!gender) missingFields.push('gender');
+    if (!phoneNumber) missingFields.push('phoneNumber');
+    if (!address) missingFields.push('address');
+    if (!governorate) missingFields.push('governorate');
+    if (!city) missingFields.push('city');
+    if (!email) missingFields.push('email');
+    if (!password) missingFields.push('password');
 
-    if (isMinor && !parentNationalId) {
-      console.log('❌ Missing parent national ID for minor');
+    if (missingFields.length > 0) {
+      console.log('❌ Missing required fields:', missingFields);
       return res.status(400).json({
         success: false,
-        message: 'رقم الهوية الوطنية للوالد/الوالدة مطلوب للقاصرين'
-      });
-    }
-
-    if (!isMinor && !nationalId) {
-      console.log('❌ Missing national ID for adult');
-      return res.status(400).json({
-        success: false,
-        message: 'رقم الهوية الوطنية مطلوب'
+        message: `الحقول التالية مطلوبة: ${missingFields.join(', ')}`
       });
     }
 
@@ -109,265 +204,195 @@ exports.signup = async (req, res) => {
       });
     }
 
-    console.log('✅ Step 2: All required fields present');
-
-    // ========================================
-    // 3. التحقق من عدم وجود حساب مسبق
-    // ========================================
-    console.log('🔍 Checking for existing account/person...');
-
-    if (!isMinor) {
-      // ✅ ADULTS: Check both email and nationalId
-      console.log('👤 Adult registration - checking email and nationalId...');
-      
-      // Check email
-      const existingAccount = await Account.findOne({ email: email.toLowerCase() });
-      if (existingAccount) {
-        console.log('❌ Email already exists');
-        return res.status(400).json({
-          success: false,
-          message: 'البريد الإلكتروني مستخدم بالفعل'
-        });
-      }
-      
-      // Check nationalId
-      console.log('🔎 Checking national ID:', nationalId);
-      console.log('🔎 National ID type:', typeof nationalId);
-      
-      const existingPerson = await Person.findOne({ nationalId });
-      if (existingPerson) {
-        console.log('❌ National ID already exists');
-        console.log('🔎 Existing person:', existingPerson);
-        return res.status(400).json({
-          success: false,
-          message: 'رقم الهوية الوطنية مستخدم بالفعل'
-        });
-      }
-      
-      console.log('✅ Adult: No duplicates found');
-      
-    } else {
-      // ✅ CHILDREN: NO email check (children use parent's account)
-      console.log('👶 Child registration - verifying parent exists...');
-      
-      // Verify parent exists
-      const parentPerson = await Person.findOne({ nationalId: parentNationalId });
-      if (!parentPerson) {
-        console.log('❌ Parent not found with nationalId:', parentNationalId);
-        return res.status(404).json({
-          success: false,
-          message: 'لم يتم العثور على حساب الوالد/الوالدة. يجب تسجيل الوالد أولاً'
-        });
-      }
-      
-      console.log('✅ Parent found:', parentPerson.firstName, parentPerson.lastName);
-      console.log('✅ Parent ID:', parentPerson._id);
-      
-      // Count existing children for this parent
-      const existingChildrenCount = await Person.countDocuments({ 
-        parentNationalId: parentNationalId 
-      });
-      
-      console.log(`✅ Parent currently has ${existingChildrenCount} existing children`);
-      
-      if (existingChildrenCount >= 999) {
-        console.log('❌ Parent has reached maximum children limit (999)');
-        return res.status(400).json({
-          success: false,
-          message: 'تم الوصول للحد الأقصى من الأطفال المسموح به (999 طفل)'
-        });
-      }
-      
-      console.log('✅ Child: Parent verified, can proceed with registration');
-    }
-
-    console.log('✅ Step 3: Validation passed - No duplicates found');
-
-    // ========================================
-    // 4. التحقق من صحة تاريخ الميلاد
-    // ========================================
-     const birthDate = new Date(dateOfBirth);
+    const birthDate = new Date(dateOfBirth);
     const today = new Date();
-    
-    if (birthDate >= today) {
-      console.log('❌ Invalid birth date - future date');
-      return res.status(400).json({
-        success: false,
-        message: 'تاريخ الميلاد يجب أن يكون في الماضي'
-      });
-    }
 
-    // حساب العمر بالأيام للدقة (يسمح بحديثي الولادة)
-    const ageInDays = Math.floor((today - birthDate) / (1000 * 60 * 60 * 24));
-    const ageInYears = today.getFullYear() - birthDate.getFullYear();
-
-    // يسمح بالتسجيل من عمر يوم واحد (أو حتى 0 يوم) لغاية 120 سنة
-    if (ageInDays < 0 || ageInYears > 120) {
-      console.log('❌ Invalid age - days:', ageInDays, 'years:', ageInYears);
+    if (Number.isNaN(birthDate.getTime()) || birthDate >= today) {
       return res.status(400).json({
         success: false,
         message: 'تاريخ الميلاد غير صحيح'
       });
     }
 
-    console.log('✅ Step 4: Birth date validated');
-    console.log('   Age in days:', ageInDays);
-    console.log('   Age in years:', ageInYears);
-    console.log('   Is newborn:', ageInDays < 7 ? 'Yes' : 'No');
+    const ageYears = calculateAgeYears(birthDate);
 
-    // ========================================
-    // 5. Generate Child ID for Minors (SIMPLE - NO UUID)
-    // ========================================
-    let childId = null;
+    if (ageYears > 120) {
+      return res.status(400).json({
+        success: false,
+        message: 'تاريخ الميلاد غير صحيح'
+      });
+    }
+
+    const isMinor = ageYears < 14;
+    console.log(`📦 Age: ${ageYears} years → ${isMinor ? 'MINOR (Children)' : 'ADULT (Person)'}`);
+
+    if (isMinor && !parentNationalId) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرقم الوطني للوالد مطلوب للقاصرين'
+      });
+    }
+
+    if (!isMinor && !nationalId) {
+      return res.status(400).json({
+        success: false,
+        message: 'الرقم الوطني مطلوب'
+      });
+    }
+
+    const existingAccount = await Account.findOne({ email: email.toLowerCase() });
+    if (existingAccount) {
+      console.log('❌ Email already exists:', email);
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني مستخدم بالفعل'
+      });
+    }
+
+    let profile;
+    let account;
+    let patient;
+
     if (isMinor) {
-      console.log('🔍 Generating unique child ID for minor...');
-      
-      // Try sequential numbers from 1 to 999
-      let foundUniqueId = false;
-      
-      for (let childNumber = 1; childNumber <= 999; childNumber++) {
-        // Format: parentId-001, parentId-002, etc.
-        const candidateId = `${parentNationalId}-${childNumber.toString().padStart(3, '0')}`;
-        
-        // Check if this childId already exists in database
-        const existingChild = await Person.findOne({ childId: candidateId });
-        
-        if (!existingChild) {
-          // This ID is available!
-          childId = candidateId;
-          foundUniqueId = true;
-          console.log('✅ Generated unique child ID:', childId);
-          break;
-        }
-        
-        console.log(`⚠️  Child ID ${candidateId} already exists, trying next...`);
-      }
-      
-      if (!foundUniqueId) {
-        // This should never happen (999 children limit!)
-        console.log('❌ Could not generate unique child ID - limit reached');
-        return res.status(500).json({
+      console.log('👶 Routing to Children collection');
+
+      const parent = await Person.findOne({ nationalId: parentNationalId });
+      if (!parent) {
+        console.log('❌ Parent not found:', parentNationalId);
+        return res.status(404).json({
           success: false,
-          message: 'تم الوصول للحد الأقصى من الأطفال المسجلين لهذا الوالد'
+          message: 'لم يتم العثور على حساب الوالد. يجب تسجيل الوالد أولاً'
         });
       }
-    }
+      console.log('✅ Parent found:', parent.firstName, parent.lastName);
 
-    // ========================================
-    // 6. إنشاء Person Document
-    // ========================================
-    console.log('📝 Creating Person document...');
-    const personData = {
-      firstName: firstName.trim(),
-      lastName: lastName.trim(),
-      dateOfBirth: birthDate,
-      gender,
-      phoneNumber: phoneNumber.replace(/\s/g, ''),
-      address: address?.trim()
-    };
+      const childRegistrationNumber = await Children.generateRegistrationNumber();
+      console.log('✅ Generated CRN:', childRegistrationNumber);
 
-    if (isMinor) {
-      personData.nationalId = null;
-      personData.parentNationalId = parentNationalId;
-      personData.childId = childId;
-      personData.isMinor = true;
+      profile = await Children.create({
+        childRegistrationNumber,
+        parentNationalId,
+        parentPersonId: parent._id,
+        firstName: firstName.trim(),
+        fatherName: fatherName.trim(),
+        lastName: lastName.trim(),
+        motherName: motherName.trim(),
+        dateOfBirth: birthDate,
+        gender,
+        phoneNumber: phoneNumber.replace(/\s/g, ''),
+        governorate,
+        city: city.trim(),
+        address: address.trim(),
+        migrationStatus: 'pending',
+        hasReceivedNationalId: false
+      });
+      console.log('✅ Children doc created:', profile._id);
+
+      account = await Account.create({
+        email: email.trim().toLowerCase(),
+        password,
+        roles: ['patient'],
+        childId: profile._id,
+        isActive: true
+      });
+      console.log('✅ Account created (linked to childId):', account._id);
+
+      patient = await Patient.create({
+        childId: profile._id,
+        bloodType: bloodType || 'unknown',
+        height: height ? parseFloat(height) : undefined,
+        weight: weight ? parseFloat(weight) : undefined,
+        smokingStatus: smokingStatus || undefined,
+        allergies: Array.isArray(allergies) ? allergies : [],
+        chronicDiseases: Array.isArray(chronicDiseases) ? chronicDiseases : [],
+        familyHistory: Array.isArray(familyHistory) ? familyHistory : [],
+        emergencyContact: {
+          name: emergencyName.trim(),
+          relationship: emergencyRelationship.trim(),
+          phoneNumber: emergencyPhone.replace(/\s/g, '')
+        }
+      });
+      console.log('✅ Patient profile created:', patient._id);
+
     } else {
-      personData.nationalId = nationalId;
-      personData.parentNationalId = undefined;  
-personData.childId = undefined;        
-      personData.isMinor = false;
-    }
+      console.log('👤 Routing to Person collection');
 
-    const person = await Person.create(personData);
-    console.log('✅ Step 5: Person created with ID:', person._id);
-
-    // ========================================
-    // 7. إنشاء Account Document
-    // ========================================
-    console.log('📝 Creating Account document...');
-    const account = await Account.create({
-      email: email.trim().toLowerCase(),
-      password,
-      roles: ['patient'],
-      personId: person._id,
-      isActive: true
-    });
-    console.log('✅ Step 6: Account created with ID:', account._id);
-
-    // ========================================
-    // 8. تحضير بيانات Patient
-    // ========================================
-    console.log('📝 Preparing Patient data...');
-    const patientData = {
-      personId: person._id,
-      emergencyContact: {
-        name: emergencyName.trim(),
-        relationship: emergencyRelationship.trim(),
-        phoneNumber: emergencyPhone.replace(/\s/g, '')
+      const existingPerson = await Person.findOne({ nationalId });
+      if (existingPerson) {
+        console.log('❌ National ID already exists:', nationalId);
+        return res.status(400).json({
+          success: false,
+          message: 'الرقم الوطني مستخدم بالفعل'
+        });
       }
-    };
 
-    if (bloodType) patientData.bloodType = bloodType;
-    if (height) patientData.height = parseFloat(height);
-    if (weight) patientData.weight = parseFloat(weight);
-    if (smokingStatus) patientData.smokingStatus = smokingStatus;
-    if (allergies && Array.isArray(allergies) && allergies.length > 0) {
-      patientData.allergies = allergies;
-    }
-    if (chronicDiseases && Array.isArray(chronicDiseases) && chronicDiseases.length > 0) {
-      patientData.chronicDiseases = chronicDiseases;
-    }
-    if (familyHistory && Array.isArray(familyHistory) && familyHistory.length > 0) {
-      patientData.familyHistory = familyHistory;
+      profile = await Person.create({
+        nationalId,
+        firstName: firstName.trim(),
+        fatherName: fatherName.trim(),
+        lastName: lastName.trim(),
+        motherName: motherName.trim(),
+        dateOfBirth: birthDate,
+        gender,
+        phoneNumber: phoneNumber.replace(/\s/g, ''),
+        governorate,
+        city: city.trim(),
+        address: address.trim()
+      });
+      console.log('✅ Person doc created:', profile._id);
+
+      account = await Account.create({
+        email: email.trim().toLowerCase(),
+        password,
+        roles: ['patient'],
+        personId: profile._id,
+        isActive: true
+      });
+      console.log('✅ Account created (linked to personId):', account._id);
+
+      patient = await Patient.create({
+        personId: profile._id,
+        bloodType: bloodType || 'unknown',
+        height: height ? parseFloat(height) : undefined,
+        weight: weight ? parseFloat(weight) : undefined,
+        smokingStatus: smokingStatus || undefined,
+        allergies: Array.isArray(allergies) ? allergies : [],
+        chronicDiseases: Array.isArray(chronicDiseases) ? chronicDiseases : [],
+        familyHistory: Array.isArray(familyHistory) ? familyHistory : [],
+        emergencyContact: {
+          name: emergencyName.trim(),
+          relationship: emergencyRelationship.trim(),
+          phoneNumber: emergencyPhone.replace(/\s/g, '')
+        }
+      });
+      console.log('✅ Patient profile created:', patient._id);
     }
 
-    // ========================================
-    // 9. إنشاء Patient Document
-    // ========================================
-    console.log('📝 Creating Patient document...');
-    const patient = await Patient.create(patientData);
-    console.log('✅ Step 7: Patient created with ID:', patient._id);
-
-    // ========================================
-    // 10. توليد JWT Token
-    // ========================================
     const token = generateToken(account._id);
-    console.log('✅ Step 8: Token generated');
+    console.log('✅ Token issued');
+    console.log('✅✅✅ SIGNUP SUCCESSFUL ✅✅✅');
 
-    // ========================================
-    // 11. إرسال الاستجابة
-    // ========================================
-    console.log('✅✅✅ SIGNUP SUCCESSFUL! ✅✅✅');
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'تم التسجيل بنجاح',
       token,
-      user: {
-        accountId: account._id,
-        email: account.email,
-        roles: account.roles,
-        personId: person._id,
-        firstName: person.firstName,
-        lastName: person.lastName,
-        nationalId: person.nationalId,
-        childId: person.childId,
-        isMinor: person.isMinor,
-        phoneNumber: person.phoneNumber,
-        dateOfBirth: person.dateOfBirth,
-        gender: person.gender,
-        address: person.address
-      }
+      user: buildUserResponse(account, profile, {
+        patient: {
+          bloodType: patient.bloodType,
+          allergies: patient.allergies,
+          chronicDiseases: patient.chronicDiseases,
+          emergencyContact: patient.emergencyContact
+        }
+      })
     });
 
   } catch (error) {
-    console.error('❌❌❌ SIGNUP ERROR - FULL DETAILS ❌❌❌');
-    console.error('Error Name:', error.name);
-    console.error('Error Message:', error.message);
-    console.error('Error Stack:', error.stack);
+    console.error('❌❌❌ SIGNUP ERROR ❌❌❌');
+    console.error('Name:', error.name);
+    console.error('Message:', error.message);
 
     if (error.name === 'ValidationError') {
-      console.error('Validation Error Details:', error.errors);
-      const messages = Object.values(error.errors).map(err => err.message);
+      const messages = Object.values(error.errors).map((e) => e.message);
       return res.status(400).json({
         success: false,
         message: messages[0] || 'خطأ في البيانات المدخلة'
@@ -375,13 +400,12 @@ personData.childId = undefined;
     }
 
     if (error.code === 11000) {
-      console.error('Duplicate Key Error:', error.keyPattern);
       const field = Object.keys(error.keyPattern)[0];
       const arabicFields = {
         email: 'البريد الإلكتروني',
-        nationalId: 'رقم الهوية الوطنية',
+        nationalId: 'الرقم الوطني',
         phoneNumber: 'رقم الهاتف',
-        childId: 'معرف الطفل'
+        childRegistrationNumber: 'رقم تسجيل الطفل'
       };
       return res.status(400).json({
         success: false,
@@ -389,322 +413,208 @@ personData.childId = undefined;
       });
     }
 
-    res.status(500).json({
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ في السيرفر. الرجاء المحاولة مرة أخرى'
     });
   }
 };
 
-// @desc    Login user
-// @route   POST /api/auth/login
-// @access  Public
+// ============================================================================
+// 2. LOGIN
+// ============================================================================
+
 exports.login = async (req, res) => {
+  console.log('🔵 ========== LOGIN ATTEMPT ==========');
+
   try {
     const { email, password } = req.body;
-    
-    // ✅ DEBUG: Log login attempt
-    console.log('🔵 ========== LOGIN ATTEMPT ==========');
-    console.log('📧 Email received:', email);
-    console.log('🔐 Password received:', password);
-    
-    const account = await Account.findOne({ email: email.toLowerCase() });
-    
-    // ✅ DEBUG: Check if account found
-    console.log('🔍 Account found:', account ? 'YES ✅' : 'NO ❌');
-    
-    if (account) {
-      console.log('📧 Account email in DB:', account.email);
-      console.log('✅ Account active:', account.isActive);
-      console.log('👤 Account roles:', account.roles);
-      console.log('🔐 Password hash in DB:', account.password);
+
+    if (!email || !password) {
+      return res.status(400).json({
+        success: false,
+        message: 'البريد الإلكتروني وكلمة المرور مطلوبان'
+      });
     }
 
+    console.log('📧 Email:', email);
+
+    const account = await Account.findForLogin(email);
+
     if (!account) {
-      console.log('❌ FAILED: Account not found in database!');
+      console.log('❌ Account not found');
       return res.status(401).json({
         success: false,
         message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
       });
     }
-    
+
     if (!account.isActive) {
-      console.log('❌ FAILED: Account is not active!');
+      console.log('❌ Account deactivated');
       return res.status(403).json({
         success: false,
         message: 'الحساب غير مفعّل. الرجاء التواصل مع الإدارة'
       });
     }
 
-    // ✅ DEBUG: Check password comparison
-    console.log('🔐 Calling comparePassword method...');
-    const isPasswordCorrect = await account.comparePassword(password);
-    console.log('🔐 Password comparison result:', isPasswordCorrect ? 'CORRECT ✅' : 'INCORRECT ❌');
-
-    if (!isPasswordCorrect) {
-      console.log('❌ FAILED: Password is incorrect!');
-      return res.status(401).json({
+    if (account.isLocked()) {
+      const minutesLeft = Math.ceil(
+        (account.accountLockedUntil - new Date()) / 60000
+      );
+      console.log(`❌ Account locked for ${minutesLeft} more minutes`);
+      return res.status(403).json({
         success: false,
-        message: 'البريد الإلكتروني أو كلمة المرور غير صحيحة'
+        message: `الحساب مغلق مؤقتاً. حاول مرة أخرى بعد ${minutesLeft} دقيقة`
       });
     }
-    
-    console.log('✅ Password verified successfully!');
-    
-    // Update last login
-    account.lastLogin = new Date();
-    await account.save();
-    console.log('✅ Last login updated');
 
-    const person = await Person.findById(account.personId);
+    const isPasswordCorrect = await account.comparePassword(password);
 
-    if (!person) {
-      console.log('❌ FAILED: Person not found!');
+    if (!isPasswordCorrect) {
+      console.log('❌ Wrong password');
+      await account.recordFailedLogin();
+      const remaining = 5 - account.failedLoginAttempts;
+      return res.status(401).json({
+        success: false,
+        message: remaining > 0
+          ? `البريد الإلكتروني أو كلمة المرور غير صحيحة. محاولات متبقية: ${remaining}`
+          : 'تم قفل الحساب لـ 15 دقيقة بسبب محاولات فاشلة متعددة'
+      });
+    }
+
+    const clientIp = req.ip || req.connection?.remoteAddress;
+    await account.recordSuccessfulLogin(clientIp);
+    console.log('✅ Password verified, login state reset');
+
+    let profile;
+    if (account.personId) {
+      profile = await Person.findById(account.personId).lean();
+    } else if (account.childId) {
+      profile = await Children.findById(account.childId).lean();
+    }
+
+    if (!profile) {
+      console.log('❌ Profile (Person/Children) not found');
       return res.status(404).json({
         success: false,
         message: 'بيانات المستخدم غير موجودة'
       });
     }
-    
-    console.log('✅ Person found:', person.firstName, person.lastName);
 
-    let roleData = {};
-
-    for (const role of account.roles) {
-      if (role === 'patient') {
-        const patient = await Patient.findOne({ personId: account.personId });
-        if (patient) {
-          roleData.patient = {
-            bloodType: patient.bloodType,
-            height: patient.height,
-            weight: patient.weight,
-            allergies: patient.allergies,
-            chronicDiseases: patient.chronicDiseases,
-            smokingStatus: patient.smokingStatus,
-            emergencyContact: patient.emergencyContact
-          };
-        }
-      }
-
-      if (role === 'doctor') {
-        console.log('🔍 Loading doctor data...');
-        const doctor = await Doctor.findOne({ personId: account.personId });
-        if (doctor) {
-          console.log('✅ Doctor found:', doctor.medicalLicenseNumber);
-          roleData.doctor = {
-            medicalLicenseNumber: doctor.medicalLicenseNumber,
-            specialization: doctor.specialization,
-            yearsOfExperience: doctor.yearsOfExperience,
-            hospitalAffiliation: doctor.hospitalAffiliation,
-            consultationFee: doctor.consultationFee
-          };
-        } else {
-          console.log('❌ Doctor not found for personId:', account.personId);
-        }
-      }
-
-      if (role === 'admin') {
-        roleData.admin = {
-          hasAdminAccess: true
-        };
-      }
-    }
+    const roleData = await buildRoleData(account);
 
     const token = generateToken(account._id);
-    console.log('✅ Token generated');
+    console.log('✅✅✅ LOGIN SUCCESS ✅✅✅');
 
-    console.log('✅ ========== LOGIN SUCCESS ==========');
-    
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'تم تسجيل الدخول بنجاح',
       token,
-      user: {
-        accountId: account._id,
-        email: account.email,
-        roles: account.roles,
-        isActive: account.isActive,
-        personId: person._id,
-        firstName: person.firstName,
-        lastName: person.lastName,
-        nationalId: person.nationalId,
-        childId: person.childId,
-        isMinor: person.isMinor,
-        phoneNumber: person.phoneNumber,
-        dateOfBirth: person.dateOfBirth,
-        gender: person.gender,
-        address: person.address,
-        roleData
-      }
+      user: buildUserResponse(account, profile, roleData)
     });
 
   } catch (error) {
-    console.error('❌ ========== LOGIN ERROR ==========');
-    console.error('Error details:', error);
-    res.status(500).json({
+    console.error('❌ LOGIN ERROR:', error);
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء تسجيل الدخول'
     });
   }
 };
 
-// @desc    Verify JWT token
-// @route   GET /api/auth/verify
-// @access  Private
+// ============================================================================
+// 3. VERIFY TOKEN
+// ============================================================================
+
 exports.verifyToken = async (req, res) => {
   try {
-    const person = await Person.findById(req.account.personId);
+    const account = req.account;
 
-    if (!person) {
+    let profile;
+    if (account.personId) {
+      profile = await Person.findById(account.personId).lean();
+    } else if (account.childId) {
+      profile = await Children.findById(account.childId).lean();
+    }
+
+    if (!profile) {
       return res.status(404).json({
         success: false,
         message: 'بيانات المستخدم غير موجودة'
       });
     }
 
-    let roleData = {};
+    const roleData = await buildRoleData(account);
 
-    for (const role of req.account.roles) {
-      if (role === 'patient') {
-        const patient = await Patient.findOne({ personId: req.account.personId });
-        if (patient) {
-          roleData.patient = {
-            bloodType: patient.bloodType,
-            height: patient.height,
-            weight: patient.weight,
-            allergies: patient.allergies,
-            chronicDiseases: patient.chronicDiseases,
-            smokingStatus: patient.smokingStatus
-          };
-        }
-      }
-
-      if (role === 'doctor') {
-        const doctor = await Doctor.findOne({ personId: req.account.personId });
-        if (doctor) {
-          roleData.doctor = {
-            medicalLicenseNumber: doctor.medicalLicenseNumber,
-            specialization: doctor.specialization,
-            yearsOfExperience: doctor.yearsOfExperience,
-            hospitalAffiliation: doctor.hospitalAffiliation
-          };
-        }
-      }
-
-      if (role === 'admin') {
-        roleData.admin = {
-          hasAdminAccess: true
-        };
-      }
-    }
-
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
-      user: {
-        accountId: req.account._id,
-        email: req.account.email,
-        roles: req.account.roles,
-        isActive: req.account.isActive,
-        personId: person._id,
-        firstName: person.firstName,
-        lastName: person.lastName,
-        nationalId: person.nationalId,
-        phoneNumber: person.phoneNumber,
-        dateOfBirth: person.dateOfBirth,
-        gender: person.gender,
-        address: person.address,
-        roleData
-      }
+      user: buildUserResponse(account, profile, roleData)
     });
 
   } catch (error) {
-    console.error('Verify Token Error:', error);
-    res.status(500).json({
+    console.error('❌ Verify Token Error:', error);
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء التحقق من الرمز'
     });
   }
 };
 
-// @desc    Update last login timestamp
-// @route   POST /api/auth/update-last-login
-// @access  Private
+// ============================================================================
+// 4. UPDATE LAST LOGIN
+// ============================================================================
+
 exports.updateLastLogin = async (req, res) => {
   try {
     req.account.lastLogin = new Date();
     await req.account.save();
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       message: 'تم تحديث آخر تسجيل دخول'
     });
-
   } catch (error) {
-    console.error('Update Last Login Error:', error);
-    res.status(500).json({
+    console.error('❌ Update Last Login Error:', error);
+    return res.status(500).json({
       success: false,
       message: 'حدث خطأ أثناء التحديث'
     });
   }
 };
 
-// ==================== DOCTOR REGISTRATION REQUEST ====================
+// ============================================================================
+// 5. DOCTOR REGISTRATION REQUEST (with file uploads)
+// ============================================================================
 
-const DoctorRequest = require('../models/DoctorRequest');
-const bcrypt = require('bcryptjs');
-const path = require('path');
-
-/**
- * @desc    Submit doctor registration request WITH FILES
- * @route   POST /api/auth/register-doctor
- * @access  Public
- */
 exports.registerDoctorRequest = async (req, res) => {
-  console.log('📋 Doctor registration request received');
-  console.log('📦 Request body:', req.body);
-  console.log('📎 Files:', req.files);
+  console.log('📋 ========== DOCTOR REGISTRATION REQUEST ==========');
 
   try {
     const {
-      // Personal Information
-      firstName,
-      lastName,
-      nationalId,
-      dateOfBirth,
-      gender,
-      phoneNumber,
-      address,
-      governorate,
-      city,
-      
-      // Account Information
-      email,
-      password,
-      
-      // Doctor Information
-      medicalLicenseNumber,
-      specialization,
-      subSpecialization,
-      yearsOfExperience,
-      hospitalAffiliation,
-      availableDays,
-      consultationFee
+      firstName, fatherName, lastName, motherName,
+      nationalId, dateOfBirth, gender,
+      phoneNumber, address, governorate, city,
+      email, password,
+      medicalLicenseNumber, specialization, subSpecialization,
+      yearsOfExperience, hospitalAffiliation, availableDays, consultationFee
     } = req.body;
 
-    // ==================== VALIDATION ====================
-    console.log('🔍 Step 1: Validating required fields...');
-
-    if (!firstName || !lastName || !nationalId || !dateOfBirth || !gender || 
-        !phoneNumber || !address || !governorate || !email || !password || 
-        !medicalLicenseNumber || !specialization || !hospitalAffiliation || 
-        !availableDays || yearsOfExperience === undefined) {
+    const required = [
+      'firstName', 'fatherName', 'lastName', 'motherName',
+      'nationalId', 'dateOfBirth', 'gender',
+      'phoneNumber', 'address', 'governorate', 'city',
+      'email', 'password',
+      'medicalLicenseNumber', 'specialization', 'hospitalAffiliation'
+    ];
+    const missing = required.filter((f) => !req.body[f]);
+    if (missing.length > 0 || yearsOfExperience === undefined) {
+      console.log('❌ Missing fields:', missing);
       return res.status(400).json({
         success: false,
         message: 'جميع الحقول المطلوبة يجب أن تكون مملوءة'
       });
     }
 
-    // Parse availableDays if it's a string (from FormData)
     let parsedAvailableDays = availableDays;
     if (typeof availableDays === 'string') {
       try {
@@ -717,154 +627,81 @@ exports.registerDoctorRequest = async (req, res) => {
       }
     }
 
-    // ==================== CHECK DUPLICATES ====================
-    console.log('🔍 Step 2: Checking for duplicates...');
+    const checks = await Promise.all([
+      DoctorRequest.findOne({ nationalId }),
+      Person.findOne({ nationalId }),
+      DoctorRequest.findOne({ email: email.toLowerCase() }),
+      Account.findOne({ email: email.toLowerCase() }),
+      DoctorRequest.findOne({ medicalLicenseNumber: medicalLicenseNumber.toUpperCase() }),
+      Doctor.findOne({ medicalLicenseNumber: medicalLicenseNumber.toUpperCase() })
+    ]);
 
-    const existingRequestByNationalId = await DoctorRequest.findOne({ nationalId });
-    if (existingRequestByNationalId) {
-      return res.status(400).json({
-        success: false,
-        message: 'يوجد طلب تسجيل سابق بهذا الرقم الوطني'
-      });
+    if (checks[0] || checks[1]) {
+      return res.status(400).json({ success: false, message: 'الرقم الوطني مسجل مسبقاً في النظام' });
+    }
+    if (checks[2] || checks[3]) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مسجل مسبقاً في النظام' });
+    }
+    if (checks[4] || checks[5]) {
+      return res.status(400).json({ success: false, message: 'رقم الترخيص الطبي مسجل مسبقاً في النظام' });
     }
 
-    const existingPerson = await Person.findOne({ nationalId });
-    if (existingPerson) {
-      return res.status(400).json({
-        success: false,
-        message: 'هذا الرقم الوطني مسجل مسبقاً في النظام'
-      });
-    }
-
-    const existingRequestByEmail = await DoctorRequest.findOne({ email });
-    if (existingRequestByEmail) {
-      return res.status(400).json({
-        success: false,
-        message: 'يوجد طلب تسجيل سابق بهذا البريد الإلكتروني'
-      });
-    }
-
-    const existingAccount = await Account.findOne({ email });
-    if (existingAccount) {
-      return res.status(400).json({
-        success: false,
-        message: 'هذا البريد الإلكتروني مسجل مسبقاً في النظام'
-      });
-    }
-
-    const existingRequestByLicense = await DoctorRequest.findOne({ medicalLicenseNumber });
-    if (existingRequestByLicense) {
-      return res.status(400).json({
-        success: false,
-        message: 'يوجد طلب تسجيل سابق بهذا رقم الترخيص الطبي'
-      });
-    }
-
-    const existingDoctor = await Doctor.findOne({ medicalLicenseNumber });
-    if (existingDoctor) {
-      return res.status(400).json({
-        success: false,
-        message: 'رقم الترخيص الطبي مسجل مسبقاً في النظام'
-      });
-    }
-
-    // ==================== PROCESS FILES ====================
-    console.log('📎 Step 3: Processing uploaded files...');
-    
     const fileData = {};
-    
     if (req.files) {
-      // Medical Certificate
-      if (req.files.medicalCertificate && req.files.medicalCertificate[0]) {
-        const file = req.files.medicalCertificate[0];
-        fileData.medicalCertificate = {
-          fileName: file.originalname,
-          filePath: file.path,
-          fileUrl: `/uploads/doctor-requests/${file.filename}`,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          uploadedAt: new Date()
-        };
-        console.log('✅ Medical certificate uploaded:', file.filename);
-      }
-      
-      // License Document
-      if (req.files.licenseDocument && req.files.licenseDocument[0]) {
-        const file = req.files.licenseDocument[0];
-        fileData.licenseDocument = {
-          fileName: file.originalname,
-          filePath: file.path,
-          fileUrl: `/uploads/doctor-requests/${file.filename}`,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          uploadedAt: new Date()
-        };
-        console.log('✅ License document uploaded:', file.filename);
-      }
-      
-      // Profile Photo
-      if (req.files.profilePhoto && req.files.profilePhoto[0]) {
-        const file = req.files.profilePhoto[0];
-        fileData.profilePhoto = {
-          fileName: file.originalname,
-          filePath: file.path,
-          fileUrl: `/uploads/doctor-requests/${file.filename}`,
-          mimeType: file.mimetype,
-          fileSize: file.size,
-          uploadedAt: new Date()
-        };
-        console.log('✅ Profile photo uploaded:', file.filename);
-      }
+      ['medicalCertificate', 'licenseDocument', 'profilePhoto'].forEach((key) => {
+        const file = req.files[key]?.[0];
+        if (file) {
+          fileData[key] = {
+            fileName: file.originalname,
+            filePath: file.path,
+            fileUrl: `/uploads/doctor-requests/${file.filename}`,
+            mimeType: file.mimetype,
+            fileSize: file.size,
+            uploadedAt: new Date()
+          };
+          console.log(`✅ ${key}:`, file.filename);
+        }
+      });
     }
 
-// ==================== HASH PASSWORD ====================
-console.log('🔐 Step 4: Hashing password...');
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-const hashedPassword = await bcrypt.hash(password, 10);
-console.log('✅ Password hashed successfully');
-console.log('📝 Storing plaintext password for admin display');
-
-// ==================== CREATE REQUEST ====================
-console.log('💾 Step 5: Creating doctor request...');
-
-const doctorRequest = await DoctorRequest.create({
-  // Personal Information
-  firstName,
-  lastName,
-  nationalId,
-  dateOfBirth,
-  gender,
-  phoneNumber,
-  address,
-  governorate,
-  city: city || null,
-  
-  // Account Information
-  email,
-  password: hashedPassword,      // ← للحفظ في Account
-  plainPassword: password,       // ← للعرض للـ Admin
-  
-      
-      // Doctor Information
-      medicalLicenseNumber,
+    const insertPayload = {
+      firstName: firstName.trim(),
+      fatherName: fatherName.trim(),
+      lastName: lastName.trim(),
+      motherName: motherName.trim(),
+      nationalId: nationalId.trim(),
+      dateOfBirth: new Date(dateOfBirth),
+      gender,
+      phoneNumber: phoneNumber.replace(/\s/g, ''),
+      address: address.trim(),
+      governorate,
+      city: city.trim(),
+      email: email.trim().toLowerCase(),
+      password: hashedPassword,
+      plainPassword: password,
+      medicalLicenseNumber: medicalLicenseNumber.toUpperCase().trim(),
       specialization,
-      subSpecialization: subSpecialization || null,
-      yearsOfExperience,
-      hospitalAffiliation,
-      availableDays: parsedAvailableDays,
-      consultationFee: consultationFee || 0,
-      
-      // Files
+      ...(subSpecialization && { subSpecialization: subSpecialization.trim() }),
+      yearsOfExperience: parseInt(yearsOfExperience, 10),
+      hospitalAffiliation: hospitalAffiliation.trim(),
+      availableDays: parsedAvailableDays || [],
+      consultationFee: parseFloat(consultationFee) || 0,
       ...fileData,
-      
-      // Request Status
       status: 'pending'
-    });
+    };
 
+    console.log('📝 Insert payload values for enums:');
+    console.log('   gender:        ', insertPayload.gender);
+    console.log('   governorate:   ', insertPayload.governorate);
+    console.log('   specialization:', insertPayload.specialization);
+    console.log('   status:        ', insertPayload.status);
+
+    const doctorRequest = await DoctorRequest.create(insertPayload);
     console.log('✅ Doctor request created:', doctorRequest._id);
 
-    // ==================== SEND RESPONSE ====================
-    res.status(201).json({
+    return res.status(201).json({
       success: true,
       message: 'تم إرسال طلب التسجيل بنجاح. سيتم مراجعته من قبل الإدارة قريباً.',
       requestId: doctorRequest._id,
@@ -874,446 +711,441 @@ const doctorRequest = await DoctorRequest.create({
         email: doctorRequest.email,
         medicalLicenseNumber: doctorRequest.medicalLicenseNumber,
         status: doctorRequest.status,
-        submittedAt: doctorRequest.createdAt,
-        uploadedFiles: {
-          medicalCertificate: !!fileData.medicalCertificate,
-          licenseDocument: !!fileData.licenseDocument,
-          profilePhoto: !!fileData.profilePhoto
-        }
+        submittedAt: doctorRequest.createdAt
       }
     });
 
   } catch (error) {
-    console.error('❌ Doctor registration request error:', error);
-    
-    // Handle validation errors
-    if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: 'خطأ في البيانات المدخلة',
-        errors
-      });
+    console.error('❌ Doctor request error:', error.message);
+    if (error.errInfo && error.errInfo.details) {
+      console.error('🔍 MongoDB schema validation details:', JSON.stringify(error.errInfo.details, null, 2));
     }
-
-    // Handle duplicate key errors
+    if (error.name === 'ValidationError') {
+      const messages = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: messages[0] || 'خطأ في البيانات المدخلة' });
+    }
     if (error.code === 11000) {
       const field = Object.keys(error.keyPattern)[0];
-      let arabicField = field;
-      if (field === 'nationalId') arabicField = 'الرقم الوطني';
-      if (field === 'email') arabicField = 'البريد الإلكتروني';
-      if (field === 'medicalLicenseNumber') arabicField = 'رقم الترخيص الطبي';
-      
-      return res.status(400).json({
-        success: false,
-        message: `${arabicField} مسجل مسبقاً في النظام`
-      });
+      const arabicFields = { nationalId: 'الرقم الوطني', email: 'البريد الإلكتروني', medicalLicenseNumber: 'رقم الترخيص الطبي' };
+      return res.status(400).json({ success: false, message: `${arabicFields[field] || field} مسجل مسبقاً في النظام` });
     }
-
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء إرسال طلب التسجيل'
-    });
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء إرسال طلب التسجيل' });
   }
 };
-// ==========================================
-// FORGET PASSWORD FUNCTIONS
-// ==========================================
 
-/**
- * @route   POST /api/auth/forgot-password
- * @desc    Send OTP to user's email
- * @access  Public
- */
+// ============================================================================
+// 6. FORGOT PASSWORD
+// ============================================================================
+
 exports.forgotPassword = async (req, res) => {
+  console.log('🔵 ========== FORGOT PASSWORD ==========');
   try {
     const { email } = req.body;
-
-    console.log('🔵 ========== FORGOT PASSWORD REQUEST ==========');
-    console.log('📧 Email:', email);
-
-    // Validate email
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني مطلوب'
-      });
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
     }
-
-    // Find account
     const account = await Account.findOne({ email: email.toLowerCase() });
-    
     if (!account) {
-      // ⚠️ Security: Don't reveal if email exists
-      return res.json({
-        success: true,
-        message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رمز التحقق'
-      });
+      return res.json({ success: true, message: 'إذا كان البريد الإلكتروني مسجلاً، سيتم إرسال رمز التحقق' });
     }
-
-    // Check if account is active
     if (!account.isActive) {
-      return res.status(403).json({
-        success: false,
-        message: 'الحساب غير نشط. يرجى التواصل مع الإدارة'
-      });
+      return res.status(403).json({ success: false, message: 'الحساب غير نشط. يرجى التواصل مع الإدارة' });
     }
-
-    // Generate 6-digit OTP
     const otp = generateOTP();
-    console.log('🔢 Generated OTP:', otp);
-
-    // Save OTP and expiry time (10 minutes)
     account.resetPasswordOTP = otp;
-    account.resetPasswordExpires = Date.now() + 10 * 60 * 1000; // 10 minutes
+    account.resetPasswordExpires = Date.now() + 10 * 60 * 1000;
     await account.save();
-
-    // Create email template
-    const emailHTML = createOTPEmailTemplate(otp, email);
-
-    // Send email
+    console.log('🔢 OTP generated and saved');
     try {
-      await sendEmail({
-        email: account.email,
-        subject: 'رمز استعادة كلمة المرور - Patient 360°',
-        message: emailHTML
-      });
-
-      console.log('✅ OTP email sent successfully');
-      console.log('✅ ==========================================');
-
-      res.json({
-        success: true,
-        message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني'
-      });
-
+      const emailHTML = createOTPEmailTemplate(otp, email);
+      await sendEmail({ email: account.email, subject: 'رمز استعادة كلمة المرور - Patient 360°', message: emailHTML });
+      console.log('✅ OTP email sent');
     } catch (emailError) {
-      console.error('❌ Failed to send email:', emailError);
-      
-      // Clear OTP if email fails
+      console.error('❌ Email send failed:', emailError);
       account.resetPasswordOTP = null;
       account.resetPasswordExpires = null;
       await account.save();
-
-      return res.status(500).json({
-        success: false,
-        message: 'فشل إرسال البريد الإلكتروني. يرجى المحاولة لاحقاً'
-      });
+      return res.status(500).json({ success: false, message: 'فشل إرسال البريد الإلكتروني. يرجى المحاولة لاحقاً' });
     }
-
+    return res.json({ success: true, message: 'تم إرسال رمز التحقق إلى بريدك الإلكتروني' });
   } catch (error) {
     console.error('❌ Forgot password error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في النظام'
-    });
+    return res.status(500).json({ success: false, message: 'حدث خطأ في النظام' });
   }
 };
 
-/**
- * @route   POST /api/auth/verify-otp
- * @desc    Verify OTP code
- * @access  Public
- */
+// ============================================================================
+// 7. VERIFY OTP
+// ============================================================================
+
 exports.verifyOTP = async (req, res) => {
+  console.log('🔵 ========== VERIFY OTP ==========');
   try {
     const { email, otp } = req.body;
-
-    console.log('🔵 ========== VERIFY OTP REQUEST ==========');
-    console.log('📧 Email:', email);
-    console.log('🔢 OTP received:', otp);
-    console.log('🔢 OTP type:', typeof otp);
-
-    // Validate inputs
     if (!email || !otp) {
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني ورمز التحقق مطلوبان'
-      });
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني ورمز التحقق مطلوبان' });
     }
-
-    // Convert OTP to string and trim
     const otpString = String(otp).trim();
-    console.log('🔢 OTP after trim:', otpString);
-
-    // Find account
-    const account = await Account.findOne({ 
-      email: email.toLowerCase()
-    });
-
+    const account = await Account.findOne({ email: email.toLowerCase() }).select('+resetPasswordOTP +resetPasswordExpires');
     if (!account) {
-      console.log('❌ Account not found');
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني غير صحيح'
-      });
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني غير صحيح' });
     }
-
-    console.log('🔢 OTP in database:', account.resetPasswordOTP);
-    console.log('⏰ OTP expires at:', account.resetPasswordExpires);
-    console.log('⏰ Current time:', new Date());
-
-    // Check if OTP exists
     if (!account.resetPasswordOTP) {
-      console.log('❌ No OTP found in database');
-      return res.status(400).json({
-        success: false,
-        message: 'لم يتم طلب رمز تحقق. يرجى طلب رمز جديد'
-      });
+      return res.status(400).json({ success: false, message: 'لم يتم طلب رمز تحقق. يرجى طلب رمز جديد' });
     }
-
-    // Check if OTP expired
     if (account.resetPasswordExpires < Date.now()) {
-      console.log('❌ OTP expired');
-      // Clear expired OTP
       account.resetPasswordOTP = null;
       account.resetPasswordExpires = null;
       await account.save();
-
-      return res.status(400).json({
-        success: false,
-        message: 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد'
-      });
+      return res.status(400).json({ success: false, message: 'انتهت صلاحية رمز التحقق. يرجى طلب رمز جديد' });
     }
-
-    // Compare OTPs
-    const isMatch = account.resetPasswordOTP === otpString;
-    console.log('🔐 OTP Match:', isMatch);
-
-    if (!isMatch) {
-      console.log('❌ OTP does not match');
-      return res.status(400).json({
-        success: false,
-        message: 'رمز التحقق غير صحيح'
-      });
+    if (account.resetPasswordOTP !== otpString) {
+      return res.status(400).json({ success: false, message: 'رمز التحقق غير صحيح' });
     }
-
-    console.log('✅ OTP verified successfully');
-    console.log('✅ ==========================================');
-
-    res.json({
-      success: true,
-      message: 'تم التحقق من الرمز بنجاح'
-    });
-
+    console.log('✅ OTP verified');
+    return res.json({ success: true, message: 'تم التحقق من الرمز بنجاح' });
   } catch (error) {
     console.error('❌ Verify OTP error:', error);
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في التحقق'
-    });
+    return res.status(500).json({ success: false, message: 'حدث خطأ في التحقق' });
   }
 };
 
-/**
- * @route   POST /api/auth/reset-password
- * @desc    Reset password with verified OTP
- * @access  Public
- */
+// ============================================================================
+// 8. RESET PASSWORD
+// ============================================================================
+
 exports.resetPassword = async (req, res) => {
+  console.log('🔵 ========== RESET PASSWORD ==========');
   try {
     const { email, otp, newPassword } = req.body;
-
-    console.log('🔵 ========== RESET PASSWORD REQUEST ==========');
-    console.log('📧 Email:', email);
-    console.log('🔢 OTP received:', otp);
-
-    // Validate inputs
     if (!email || !otp || !newPassword) {
-      return res.status(400).json({
-        success: false,
-        message: 'جميع الحقول مطلوبة'
-      });
+      return res.status(400).json({ success: false, message: 'جميع الحقول مطلوبة' });
     }
-
-    // Validate password length
     if (newPassword.length < 8) {
-      return res.status(400).json({
-        success: false,
-        message: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل'
-      });
+      return res.status(400).json({ success: false, message: 'كلمة المرور يجب أن تكون 8 أحرف على الأقل' });
     }
-
-    // Convert OTP to string and trim
     const otpString = String(otp).trim();
-
-    // Find account
-    const account = await Account.findOne({ 
-      email: email.toLowerCase()
-    });
-
+    const account = await Account.findOne({ email: email.toLowerCase() }).select('+resetPasswordOTP +resetPasswordExpires +password');
     if (!account) {
-      console.log('❌ Account not found');
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني غير صحيح'
-      });
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني غير صحيح' });
     }
-
-    console.log('🔢 OTP in database:', account.resetPasswordOTP);
-    console.log('🔢 OTP provided:', otpString);
-
-    // Check if OTP exists
     if (!account.resetPasswordOTP) {
-      console.log('❌ No OTP in database');
-      return res.status(400).json({
-        success: false,
-        message: 'لم يتم التحقق من رمز التحقق. يرجى المحاولة مرة أخرى'
-      });
+      return res.status(400).json({ success: false, message: 'لم يتم التحقق من رمز التحقق. يرجى المحاولة مرة أخرى' });
     }
-
-    // Check if OTP expired
     if (account.resetPasswordExpires < Date.now()) {
-      console.log('❌ OTP expired');
-      // Clear expired OTP
       account.resetPasswordOTP = null;
       account.resetPasswordExpires = null;
       await account.save();
-
-      return res.status(400).json({
-        success: false,
-        message: 'انتهت صلاحية رمز التحقق'
-      });
+      return res.status(400).json({ success: false, message: 'انتهت صلاحية رمز التحقق' });
     }
-
-    // Compare OTPs
-    const isMatch = account.resetPasswordOTP === otpString;
-    console.log('🔐 OTP Match:', isMatch);
-
-    if (!isMatch) {
-      console.log('❌ OTP does not match');
-      return res.status(400).json({
-        success: false,
-        message: 'رمز التحقق غير صحيح'
-      });
+    if (account.resetPasswordOTP !== otpString) {
+      return res.status(400).json({ success: false, message: 'رمز التحقق غير صحيح' });
     }
-
-    // Update password (will be hashed by pre-save middleware)
     account.password = newPassword;
-    
-    // Clear OTP fields
     account.resetPasswordOTP = null;
     account.resetPasswordExpires = null;
-    
+    account.failedLoginAttempts = 0;
+    account.accountLockedUntil = undefined;
     await account.save();
-
     console.log('✅ Password reset successfully');
-    console.log('✅ ==========================================');
-
-    res.json({
-      success: true,
-      message: 'تم تغيير كلمة المرور بنجاح'
-    });
-
+    return res.json({ success: true, message: 'تم تغيير كلمة المرور بنجاح' });
   } catch (error) {
     console.error('❌ Reset password error:', error);
-    
     if (error.name === 'ValidationError') {
-      const errors = Object.values(error.errors).map(err => err.message);
-      return res.status(400).json({
-        success: false,
-        message: errors[0] || 'خطأ في البيانات المدخلة'
-      });
+      const errors = Object.values(error.errors).map((e) => e.message);
+      return res.status(400).json({ success: false, message: errors[0] || 'خطأ في البيانات المدخلة' });
     }
-
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ في تغيير كلمة المرور'
-    });
+    return res.status(500).json({ success: false, message: 'حدث خطأ في تغيير كلمة المرور' });
   }
 };
 
-// ==========================================
-// ✅ NEW: CHECK DOCTOR REQUEST STATUS
-// ==========================================
+// ============================================================================
+// 9. CHECK DOCTOR REQUEST STATUS
+// ============================================================================
 
-/**
- * @route   POST /api/auth/check-doctor-status
- * @desc    Check doctor registration request status and get credentials if approved
- * @access  Public
- */
 exports.checkDoctorRequestStatus = async (req, res) => {
+  console.log('🔍 ========== CHECK DOCTOR REQUEST STATUS ==========');
   try {
-    console.log('========================================');
-    console.log('🔍 CHECK DOCTOR REQUEST STATUS');
-    console.log('========================================');
-
     const { email } = req.body;
-
-    // Validation
     if (!email) {
-      return res.status(400).json({
-        success: false,
-        message: 'البريد الإلكتروني مطلوب'
-      });
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
     }
-
-    console.log('📧 Checking status for email:', email);
-
-    // Find the request
-    const DoctorRequest = require('../models/DoctorRequest');
-    const request = await DoctorRequest.findOne({ 
-      email: email.toLowerCase() 
-    })
-      .select('status email plainPassword firstName lastName createdAt reviewedAt rejectionReason')
+    const request = await DoctorRequest.findOne({ email: email.toLowerCase() })
+      .select('+plainPassword status email firstName lastName createdAt reviewedAt rejectionReason rejectionDetails')
       .lean();
-
     if (!request) {
-      console.log('❌ No request found for this email');
-      return res.status(404).json({
-        success: false,
-        message: 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني'
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني' });
+    }
+    const response = { success: true, status: request.status, submittedAt: request.createdAt };
+    if (request.status === 'pending') {
+      response.message = 'طلبك قيد المراجعة من قبل الإدارة';
+    } else if (request.status === 'approved') {
+      response.message = 'تم قبول طلبك! يمكنك الآن تسجيل الدخول';
+      response.credentials = { email: request.email, password: request.plainPassword, name: `${request.firstName} ${request.lastName}` };
+      response.reviewedAt = request.reviewedAt;
+    } else if (request.status === 'rejected') {
+      response.message = 'تم رفض طلبك';
+      response.rejectionReason = request.rejectionReason || 'لم يتم تحديد سبب';
+      response.rejectionDetails = request.rejectionDetails || null;
+      response.reviewedAt = request.reviewedAt;
+    }
+    return res.status(200).json(response);
+  } catch (error) {
+    console.error('❌ Check status error:', error);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء التحقق من حالة الطلب' });
+  }
+};
+
+// ============================================================================
+// 10. PHARMACIST REGISTRATION REQUEST (with file uploads)
+// ============================================================================
+
+exports.registerPharmacistRequest = async (req, res) => {
+  console.log('📋 ========== PHARMACIST REGISTRATION REQUEST ==========');
+  try {
+    const {
+      firstName, fatherName, lastName, motherName,
+      nationalId, dateOfBirth, gender,
+      phoneNumber, address, governorate, city,
+      email, password,
+      pharmacyLicenseNumber, degree, specialization,
+      yearsOfExperience, employmentType,
+      pharmacyId, newPharmacyData,
+      additionalNotes
+    } = req.body;
+
+    const required = [
+      'firstName', 'fatherName', 'lastName', 'motherName',
+      'nationalId', 'dateOfBirth', 'gender',
+      'phoneNumber', 'address', 'governorate', 'city',
+      'email', 'password',
+      'pharmacyLicenseNumber'
+    ];
+    const missing = required.filter((f) => !req.body[f]);
+    if (missing.length > 0) {
+      console.log('❌ Missing fields:', missing);
+      return res.status(400).json({ success: false, message: 'جميع الحقول المطلوبة يجب أن تكون مملوءة' });
+    }
+
+    const checks = await Promise.all([
+      DoctorRequest.findOne({ nationalId }),
+      Person.findOne({ nationalId }),
+      DoctorRequest.findOne({ email: email.toLowerCase() }),
+      Account.findOne({ email: email.toLowerCase() })
+    ]);
+    if (checks[0] || checks[1]) {
+      return res.status(400).json({ success: false, message: 'الرقم الوطني مسجل مسبقاً في النظام' });
+    }
+    if (checks[2] || checks[3]) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مسجل مسبقاً في النظام' });
+    }
+
+    const fileData = {};
+    if (req.files) {
+      ['licenseDocument', 'degreeDocument', 'profilePhoto'].forEach((key) => {
+        const file = req.files[key]?.[0];
+        if (file) {
+          fileData[key] = {
+            fileName: file.originalname, filePath: file.path,
+            fileUrl: `/uploads/doctor-requests/${file.filename}`,
+            mimeType: file.mimetype, fileSize: file.size, uploadedAt: new Date()
+          };
+          console.log(`✅ ${key}:`, file.filename);
+        }
       });
     }
 
-    console.log('✅ Request found');
-    console.log('Status:', request.status);
+    const hashedPassword = await bcrypt.hash(password, 12);
 
-    // Build response based on status
+    let parsedNewPharmacy = null;
+    if (newPharmacyData) {
+      try {
+        parsedNewPharmacy = typeof newPharmacyData === 'string' ? JSON.parse(newPharmacyData) : newPharmacyData;
+      } catch (e) {
+        return res.status(400).json({ success: false, message: 'بيانات الصيدلية الجديدة غير صالحة' });
+      }
+    }
+
+    const insertPayload = {
+      requestType: 'pharmacist',
+      firstName: firstName.trim(), fatherName: fatherName.trim(),
+      lastName: lastName.trim(), motherName: motherName.trim(),
+      nationalId: nationalId.trim(), dateOfBirth: new Date(dateOfBirth), gender,
+      phoneNumber: phoneNumber.replace(/\s/g, ''), address: address.trim(),
+      governorate, city: city.trim(),
+      email: email.trim().toLowerCase(), password: hashedPassword, plainPassword: password,
+      pharmacyLicenseNumber: pharmacyLicenseNumber.toUpperCase().trim(),
+      ...(degree && { degree }), ...(specialization && { specialization }),
+      yearsOfExperience: parseInt(yearsOfExperience, 10) || 0,
+      ...(employmentType && { employmentType }),
+      ...(pharmacyId && { pharmacyId }),
+      ...(parsedNewPharmacy && { newPharmacyData: parsedNewPharmacy }),
+      ...(additionalNotes && { additionalNotes: additionalNotes.trim() }),
+      ...fileData,
+      status: 'pending'
+    };
+
+    console.log('📝 Pharmacist request — requestType:', insertPayload.requestType, 'status:', insertPayload.status);
+    const request = await DoctorRequest.create(insertPayload);
+    console.log('✅ Pharmacist request created:', request._id);
+
+    return res.status(201).json({
+      success: true,
+      message: 'تم إرسال طلب تسجيل الصيدلي بنجاح. سيتم مراجعته من قبل الإدارة قريباً.',
+      requestId: request._id,
+      data: { firstName: request.firstName, lastName: request.lastName, email: request.email, status: request.status, submittedAt: request.createdAt }
+    });
+  } catch (error) {
+    console.error('❌ Pharmacist request error:', error.message);
+    if (error.errInfo?.details) console.error('   Schema details:', JSON.stringify(error.errInfo.details, null, 2));
+    return res.status(500).json({ success: false, message: 'حدث خطأ في تقديم طلب تسجيل الصيدلي' });
+  }
+};
+
+// ============================================================================
+// 11. LAB TECHNICIAN REGISTRATION REQUEST (with file uploads)
+// ============================================================================
+
+exports.registerLabTechnicianRequest = async (req, res) => {
+  console.log('📋 ========== LAB TECHNICIAN REGISTRATION REQUEST ==========');
+  try {
+    const {
+      firstName, fatherName, lastName, motherName,
+      nationalId, dateOfBirth, gender,
+      phoneNumber, address, governorate, city,
+      email, password,
+      licenseNumber, degree, specialization, position,
+      yearsOfExperience,
+      laboratoryId, newLaboratoryData,
+      additionalNotes
+    } = req.body;
+
+    const required = [
+      'firstName', 'fatherName', 'lastName', 'motherName',
+      'nationalId', 'dateOfBirth', 'gender',
+      'phoneNumber', 'address', 'governorate', 'city',
+      'email', 'password',
+      'licenseNumber'
+    ];
+    const missing = required.filter((f) => !req.body[f]);
+    if (missing.length > 0) {
+      console.log('❌ Missing fields:', missing);
+      return res.status(400).json({ success: false, message: 'جميع الحقول المطلوبة يجب أن تكون مملوءة' });
+    }
+
+    const checks = await Promise.all([
+      DoctorRequest.findOne({ nationalId }),
+      Person.findOne({ nationalId }),
+      DoctorRequest.findOne({ email: email.toLowerCase() }),
+      Account.findOne({ email: email.toLowerCase() })
+    ]);
+    if (checks[0] || checks[1]) {
+      return res.status(400).json({ success: false, message: 'الرقم الوطني مسجل مسبقاً في النظام' });
+    }
+    if (checks[2] || checks[3]) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مسجل مسبقاً في النظام' });
+    }
+
+    const fileData = {};
+    if (req.files) {
+      ['licenseDocument', 'degreeDocument', 'profilePhoto'].forEach((key) => {
+        const file = req.files[key]?.[0];
+        if (file) {
+          fileData[key] = {
+            fileName: file.originalname, filePath: file.path,
+            fileUrl: `/uploads/doctor-requests/${file.filename}`,
+            mimeType: file.mimetype, fileSize: file.size, uploadedAt: new Date()
+          };
+          console.log(`✅ ${key}:`, file.filename);
+        }
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 12);
+
+    let parsedNewLab = null;
+    if (newLaboratoryData) {
+      try {
+        parsedNewLab = typeof newLaboratoryData === 'string' ? JSON.parse(newLaboratoryData) : newLaboratoryData;
+      } catch (e) {
+        return res.status(400).json({ success: false, message: 'بيانات المختبر الجديد غير صالحة' });
+      }
+    }
+
+    const insertPayload = {
+      requestType: 'lab_technician',
+      firstName: firstName.trim(), fatherName: fatherName.trim(),
+      lastName: lastName.trim(), motherName: motherName.trim(),
+      nationalId: nationalId.trim(), dateOfBirth: new Date(dateOfBirth), gender,
+      phoneNumber: phoneNumber.replace(/\s/g, ''), address: address.trim(),
+      governorate, city: city.trim(),
+      email: email.trim().toLowerCase(), password: hashedPassword, plainPassword: password,
+      licenseNumber: licenseNumber.toUpperCase().trim(),
+      ...(degree && { degree }), ...(specialization && { specialization }),
+      ...(position && { position }),
+      yearsOfExperience: parseInt(yearsOfExperience, 10) || 0,
+      ...(laboratoryId && { laboratoryId }),
+      ...(parsedNewLab && { newLaboratoryData: parsedNewLab }),
+      ...(additionalNotes && { additionalNotes: additionalNotes.trim() }),
+      ...fileData,
+      status: 'pending'
+    };
+
+    console.log('📝 Lab tech request — requestType:', insertPayload.requestType, 'status:', insertPayload.status);
+    const request = await DoctorRequest.create(insertPayload);
+    console.log('✅ Lab technician request created:', request._id);
+
+    return res.status(201).json({
+      success: true,
+      message: 'تم إرسال طلب تسجيل فني المختبر بنجاح. سيتم مراجعته من قبل الإدارة قريباً.',
+      requestId: request._id,
+      data: { firstName: request.firstName, lastName: request.lastName, email: request.email, status: request.status, submittedAt: request.createdAt }
+    });
+  } catch (error) {
+    console.error('❌ Lab technician request error:', error.message);
+    if (error.errInfo?.details) console.error('   Schema details:', JSON.stringify(error.errInfo.details, null, 2));
+    return res.status(500).json({ success: false, message: 'حدث خطأ في تقديم طلب تسجيل فني المختبر' });
+  }
+};
+
+// ============================================================================
+// 12. UNIFIED PROFESSIONAL STATUS CHECK
+// ============================================================================
+
+exports.checkProfessionalStatus = async (req, res) => {
+  console.log('🔍 ========== CHECK PROFESSIONAL STATUS ==========');
+  try {
+    const { email } = req.body;
+    if (!email) {
+      return res.status(400).json({ success: false, message: 'البريد الإلكتروني مطلوب' });
+    }
+    const request = await DoctorRequest.findOne({ email: email.toLowerCase() })
+      .select('+plainPassword status email firstName lastName requestType createdAt reviewedAt rejectionReason rejectionDetails')
+      .lean();
+    if (!request) {
+      return res.status(404).json({ success: false, message: 'لم يتم العثور على طلب تسجيل بهذا البريد الإلكتروني' });
+    }
     const response = {
       success: true,
       status: request.status,
+      requestType: request.requestType || 'doctor',
       submittedAt: request.createdAt
     };
-
     if (request.status === 'pending') {
-      console.log('⏳ Request is still pending');
       response.message = 'طلبك قيد المراجعة من قبل الإدارة';
-      
     } else if (request.status === 'approved') {
-      console.log('✅ Request is approved');
-      console.log('📧 Email:', request.email);
-      console.log('🔑 Password available:', !!request.plainPassword);
-      
       response.message = 'تم قبول طلبك! يمكنك الآن تسجيل الدخول';
-      response.credentials = {
-        email: request.email,
-        password: request.plainPassword, // ✅ Return plain password
-        name: `${request.firstName} ${request.lastName}`
-      };
+      response.credentials = { email: request.email, password: request.plainPassword, name: `${request.firstName} ${request.lastName}` };
       response.reviewedAt = request.reviewedAt;
-      
     } else if (request.status === 'rejected') {
-      console.log('❌ Request was rejected');
       response.message = 'تم رفض طلبك';
       response.rejectionReason = request.rejectionReason || 'لم يتم تحديد سبب';
+      response.rejectionDetails = request.rejectionDetails || null;
       response.reviewedAt = request.reviewedAt;
     }
-
-    console.log('========================================');
-    console.log('✅ Status check complete');
-    console.log('========================================');
-
-    res.status(200).json(response);
-
+    return res.status(200).json(response);
   } catch (error) {
-    console.error('========================================');
-    console.error('❌ ERROR in checkDoctorRequestStatus:', error);
-    console.error('========================================');
-
-    res.status(500).json({
-      success: false,
-      message: 'حدث خطأ أثناء التحقق من حالة الطلب'
-    });
+    console.error('❌ Check professional status error:', error);
+    return res.status(500).json({ success: false, message: 'حدث خطأ أثناء التحقق من حالة الطلب' });
   }
 };

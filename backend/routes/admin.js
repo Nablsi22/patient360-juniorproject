@@ -5,14 +5,14 @@
 const express = require('express');
 const router = express.Router();
 const adminController = require('../controllers/adminController');
-const { protect, restrictTo } = require('../middleware/auth');
+const { protect, authorize } = require('../middleware/auth');
 const { auditLog } = require('../middleware/auditLog');
 
 // ==========================================
 // APPLY AUTHENTICATION TO ALL ADMIN ROUTES
 // ==========================================
 router.use(protect);
-router.use(restrictTo('admin'));
+router.use(authorize('admin'));
 
 // ==========================================
 // STATISTICS

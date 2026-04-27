@@ -1,5 +1,6 @@
 // backend/middleware/uploadDoctorFiles.js
-// Multer configuration for doctor registration file uploads
+// Multer configuration for professional registration file uploads
+// Supports: doctor, pharmacist, lab technician
 
 const multer = require('multer');
 const path = require('path');
@@ -20,7 +21,7 @@ const storage = multer.diskStorage({
   destination: async (req, file, cb) => {
     try {
       // Generate temporary request ID
-      const tempRequestId = `temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+      const tempRequestId = `request_temp_${Date.now()}_${Math.random().toString(36).substring(7)}`;
       
       // Generate organized path
       const fileInfo = FileUploadManager.generateDoctorRequestPath(
@@ -42,7 +43,7 @@ const storage = multer.diskStorage({
       cb(null, fileInfo.directory);
       
     } catch (error) {
-      console.error('Error in doctor request storage:', error);
+      console.error('Error in request storage:', error);
       cb(error, null);
     }
   },
@@ -60,7 +61,7 @@ const storage = multer.diskStorage({
       cb(null, fileInfo.filename);
       
     } catch (error) {
-      console.error('Error generating doctor request filename:', error);
+      console.error('Error generating filename:', error);
       cb(error, null);
     }
   }
@@ -71,14 +72,11 @@ const fileFilter = (req, file, cb) => {
   console.log('🔎 File received:', file.originalname, 'Field:', file.fieldname);
   
   const allowedMimes = [
-    // Images
     'image/jpeg',
     'image/jpg',
     'image/png',
     'image/gif',
     'image/webp',
-    
-    // PDFs
     'application/pdf'
   ];
   
@@ -91,8 +89,8 @@ const fileFilter = (req, file, cb) => {
   }
 };
 
-// Multer upload configuration
-const upload = multer({
+// Base multer config (shared across all professional types)
+const baseUpload = multer({
   storage: storage,
   fileFilter: fileFilter,
   limits: {
@@ -100,11 +98,25 @@ const upload = multer({
   }
 });
 
-// Upload fields configuration
-const uploadFields = upload.fields([
-  { name: 'medicalCertificate', maxCount: 1 },   // شهادة الطب
-  { name: 'licenseDocument', maxCount: 1 },      // الترخيص الطبي
-  { name: 'profilePhoto', maxCount: 1 }          // الصورة الشخصية
+// ── Doctor upload fields (original — unchanged) ─────────────────────────────
+const uploadFields = baseUpload.fields([
+  { name: 'medicalCertificate', maxCount: 1 },
+  { name: 'licenseDocument', maxCount: 1 },
+  { name: 'profilePhoto', maxCount: 1 }
+]);
+
+// ── Pharmacist upload fields (new) ──────────────────────────────────────────
+const uploadPharmacistFields = baseUpload.fields([
+  { name: 'licenseDocument', maxCount: 1 },
+  { name: 'degreeDocument', maxCount: 1 },
+  { name: 'profilePhoto', maxCount: 1 }
+]);
+
+// ── Lab technician upload fields (new) ──────────────────────────────────────
+const uploadLabTechFields = baseUpload.fields([
+  { name: 'licenseDocument', maxCount: 1 },
+  { name: 'degreeDocument', maxCount: 1 },
+  { name: 'profilePhoto', maxCount: 1 }
 ]);
 
 // Error handling middleware
@@ -138,5 +150,7 @@ const handleUploadErrors = (err, req, res, next) => {
 
 module.exports = {
   uploadFields,
+  uploadPharmacistFields,
+  uploadLabTechFields,
   handleUploadErrors
 };

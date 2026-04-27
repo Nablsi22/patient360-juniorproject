@@ -156,7 +156,7 @@ const SIDEBAR_GROUPS = [
   {
     label: 'المراجعة والموافقات',
     items: [
-      { id: 'requests', labelAr: 'طلبات الأطباء', Icon: ClipboardList, badge: 'pendingRequests' },
+      { id: 'requests', labelAr: 'طلبات التسجيل', Icon: ClipboardList, badge: 'pendingRequests' },
     ],
   },
   {
@@ -639,6 +639,7 @@ const AdminDashboard = () => {
   const [requestsLoading, setRequestsLoading] = useState(false);
   const [requestSearch, setRequestSearch] = useState('');
   const [requestFilter, setRequestFilter] = useState('pending');
+  const [requestTypeFilter, setRequestTypeFilter] = useState('all');
   const [selectedRequest, setSelectedRequest] = useState(null);
   const [showRequestDetails, setShowRequestDetails] = useState(false);
   const [showAcceptConfirm, setShowAcceptConfirm] = useState(false);
@@ -791,13 +792,17 @@ const AdminDashboard = () => {
         || r.firstName?.toLowerCase().includes(search)
         || r.lastName?.toLowerCase().includes(search)
         || r.medicalLicenseNumber?.toLowerCase().includes(search)
+        || r.pharmacyLicenseNumber?.toLowerCase().includes(search)
+        || r.licenseNumber?.toLowerCase().includes(search)
         || r.nationalId?.includes(search)
         || r.requestId?.toLowerCase().includes(search)
         || r._id?.includes(search);
       const matchesFilter = requestFilter === 'all' || r.status === requestFilter;
-      return matchesSearch && matchesFilter;
+      const type = r.requestType || 'doctor';
+      const matchesType = requestTypeFilter === 'all' || type === requestTypeFilter;
+      return matchesSearch && matchesFilter && matchesType;
     });
-  }, [doctorRequests, requestSearch, requestFilter]);
+  }, [doctorRequests, requestSearch, requestFilter, requestTypeFilter]);
 
   const filteredDoctors = useMemo(() => {
     return doctors.filter((d) => {
@@ -2237,7 +2242,7 @@ const AdminDashboard = () => {
           )}
 
           {/* ═══════════════════════════════════════════════════════
-              SECTION: DOCTOR REQUESTS (the priority feature)
+              SECTION: PROFESSIONAL REQUESTS (doctor + pharmacist + lab tech)
               ═══════════════════════════════════════════════════════ */}
           {activeSection === 'requests' && (
             <>
@@ -2255,8 +2260,8 @@ const AdminDashboard = () => {
                     <ClipboardList size={24} strokeWidth={2} />
                   </div>
                   <div>
-                    <h1>طلبات تسجيل الأطباء</h1>
-                    <p>مراجعة وإدارة طلبات تسجيل الأطباء الجدد في النظام</p>
+                    <h1>طلبات التسجيل المهني</h1>
+                    <p>مراجعة وإدارة طلبات تسجيل الأطباء والصيادلة وفنيي المختبر</p>
                   </div>
                 </div>
                 <div className="ad-page-actions">
@@ -2271,7 +2276,52 @@ const AdminDashboard = () => {
                 </div>
               </div>
 
-              {/* Toolbar — search + filter chips */}
+              {/* Toolbar — type tabs + search + filter chips */}
+              <div className="ad-type-tabs">
+                <button
+                  type="button"
+                  className={`ad-type-tab ${requestTypeFilter === 'all' ? 'active' : ''}`}
+                  onClick={() => setRequestTypeFilter('all')}
+                >
+                  <ClipboardList size={16} strokeWidth={2} />
+                  الكل
+                  <span className="ad-type-tab-count">{doctorRequests.length}</span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${requestTypeFilter === 'doctor' ? 'active' : ''}`}
+                  onClick={() => setRequestTypeFilter('doctor')}
+                >
+                  <Stethoscope size={16} strokeWidth={2} />
+                  أطباء
+                  <span className="ad-type-tab-count">
+                    {doctorRequests.filter((r) => (r.requestType || 'doctor') === 'doctor').length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${requestTypeFilter === 'pharmacist' ? 'active' : ''}`}
+                  onClick={() => setRequestTypeFilter('pharmacist')}
+                >
+                  <Pill size={16} strokeWidth={2} />
+                  صيادلة
+                  <span className="ad-type-tab-count">
+                    {doctorRequests.filter((r) => r.requestType === 'pharmacist').length}
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  className={`ad-type-tab ${requestTypeFilter === 'lab_technician' ? 'active' : ''}`}
+                  onClick={() => setRequestTypeFilter('lab_technician')}
+                >
+                  <Microscope size={16} strokeWidth={2} />
+                  فنيي مختبر
+                  <span className="ad-type-tab-count">
+                    {doctorRequests.filter((r) => r.requestType === 'lab_technician').length}
+                  </span>
+                </button>
+              </div>
+
               <div className="ad-toolbar">
                 <div className="ad-search-box">
                   <Search size={18} strokeWidth={2} />
@@ -2351,7 +2401,8 @@ const AdminDashboard = () => {
                       <tr>
                         <th>رقم الطلب</th>
                         <th>الاسم</th>
-                        <th>التخصص</th>
+                        <th>النوع</th>
+                        <th>التخصص / الدرجة</th>
                         <th>رقم الترخيص</th>
                         <th>تاريخ الطلب</th>
                         <th>الحالة</th>
@@ -2360,8 +2411,30 @@ const AdminDashboard = () => {
                     </thead>
                     <tbody>
                       {filteredRequests.map((req) => {
-                        const specInfo = getSpecializationInfo(req.specialization);
-                        const SpecIcon = specInfo.Icon;
+                        const reqType = req.requestType || 'doctor';
+                        const specInfo = reqType === 'doctor' ? getSpecializationInfo(req.specialization) : null;
+                        const SpecIcon = specInfo?.Icon || ClipboardList;
+
+                        // Type badge config
+                        const typeConfig = {
+                          doctor:         { label: 'طبيب',       color: 'info',    Icon: Stethoscope },
+                          pharmacist:     { label: 'صيدلي',      color: 'success', Icon: Pill },
+                          lab_technician: { label: 'فني مختبر',  color: 'warning', Icon: Microscope }
+                        };
+                        const typeInfo = typeConfig[reqType] || typeConfig.doctor;
+                        const TypeIcon = typeInfo.Icon;
+
+                        // License number (differs per type)
+                        const licenseNum = req.medicalLicenseNumber
+                          || req.pharmacyLicenseNumber
+                          || req.licenseNumber
+                          || '-';
+
+                        // Specialization / degree label
+                        const specLabel = reqType === 'doctor'
+                          ? (specInfo?.nameAr || req.specialization || '-')
+                          : (req.degree || req.specialization || '-');
+
                         return (
                           <tr key={req._id}>
                             <td>
@@ -2378,19 +2451,29 @@ const AdminDashboard = () => {
                               </div>
                             </td>
                             <td>
-                              <div className="ad-cell-spec">
-                                <div className="ad-cell-spec-icon">
-                                  <SpecIcon size={14} strokeWidth={2.2} />
+                              <span className={`ad-pill ${typeInfo.color}`}>
+                                <TypeIcon size={11} strokeWidth={2.5} />
+                                {typeInfo.label}
+                              </span>
+                            </td>
+                            <td>
+                              {reqType === 'doctor' ? (
+                                <div className="ad-cell-spec">
+                                  <div className="ad-cell-spec-icon">
+                                    <SpecIcon size={14} strokeWidth={2.2} />
+                                  </div>
+                                  <span>{specLabel}</span>
+                                  {specInfo?.hasAI && (
+                                    <span className="ad-pill info" style={{ marginInlineStart: 4 }}>AI</span>
+                                  )}
                                 </div>
-                                <span>{specInfo.nameAr}</span>
-                                {specInfo.hasAI && (
-                                  <span className="ad-pill info" style={{ marginInlineStart: 4 }}>AI</span>
-                                )}
-                              </div>
+                              ) : (
+                                <span>{specLabel}</span>
+                              )}
                             </td>
                             <td>
                               <span style={{ fontFamily: 'Inter, sans-serif', fontWeight: 700, direction: 'ltr', display: 'inline-block' }}>
-                                {req.medicalLicenseNumber}
+                                {licenseNum}
                               </span>
                             </td>
                             <td>
